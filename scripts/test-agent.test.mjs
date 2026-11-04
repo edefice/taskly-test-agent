@@ -51,9 +51,14 @@ describe('parseOptions', () => {
   });
 
   it('reads the mutation and repair options', () => {
-    const options = parseOptions(['--base', 'main', '--no-mutation', '--repair-rounds', '2']);
+    const options = parseOptions(['--base', 'main', '--no-mutation', '--repair-rounds', '2', '--mutation-repair']);
     assert.equal(options.noMutation, true);
     assert.equal(options.repairRounds, 2);
+    assert.equal(options.mutationRepair, true);
+  });
+
+  it('leaves repair for mutants off by default', () => {
+    assert.equal(parseOptions(['--base', 'main']).mutationRepair, false);
   });
 
   for (const value of ['3', '-1', '1.5', 'x']) {
@@ -618,10 +623,21 @@ describe('runPipeline', () => {
       assert.match(artifact('report.md'), /`a > 0` became `true`/);
     });
 
-    it('gives survivors to the agent in a data tag when a round is allowed, and then stops', () => {
+    it('by default leaves survivors as a warning, even with repair rounds allowed', () => {
+      changeSource();
+      const { deps, calls } = fakes({ mutate: () => mutationWith(mutant()) });
+      const result = runPipeline(options({ repairRounds: 2 }), deps);
+      assert.equal(calls.claude.length, 1);
+      assert.equal(result.outcome, 'tests_added');
+      assert.equal(result.exitCode, 0);
+      assert.match(artifact('report.md'), /`a > 0` became `true`/);
+      assert.doesNotMatch(artifact('report.md'), /repair round/);
+    });
+
+    it('with mutationRepair, gives survivors to the agent in a data tag, and then stops', () => {
       changeSource();
       const { deps, calls } = fakes({ mutate: inOrder(mutationWith(mutant()), mutationWith(mutant({ line: 2 }))) });
-      const result = runPipeline(options({ repairRounds: 2 }), deps);
+      const result = runPipeline(options({ repairRounds: 2, mutationRepair: true }), deps);
       assert.equal(calls.claude.length, 2);
       const prompt = calls.claude[1][1];
       assert.match(prompt, /<untrusted-feedback-[0-9a-f]+>[\s\S]*backend\/src\/a\.ts:1: `a > 0` became `true`[\s\S]*<\/untrusted-feedback-/);
@@ -634,7 +650,7 @@ describe('runPipeline', () => {
     it('checks the repair round again with the gate and the mutation check', () => {
       changeSource();
       const { deps, calls } = fakes({ mutate: inOrder(mutationWith(mutant()), mutationWith()) });
-      runPipeline(options({ repairRounds: 2 }), deps);
+      runPipeline(options({ repairRounds: 2, mutationRepair: true }), deps);
       assert.equal(calls.verify.length, 2);
       assert.ok(existsSync(join(repo, ARTIFACTS_DIR, 'mutation.round-1.json')));
       assert.equal(JSON.parse(artifact('report-input.json')).mutation.mutants.length, 0);
@@ -643,7 +659,7 @@ describe('runPipeline', () => {
     it('keeps the artifacts of each attempt apart', () => {
       changeSource();
       const { deps } = fakes({ mutate: inOrder(mutationWith(mutant()), mutationWith()) });
-      runPipeline(options({ repairRounds: 1 }), deps);
+      runPipeline(options({ repairRounds: 1, mutationRepair: true }), deps);
       for (const name of ['prompt.round-1.txt', 'feedback.round-1.txt', 'transcript.round-1.jsonl', 'result.round-1.json', 'verify.round-1.json', 'mutation.round-1.json']) {
         assert.ok(existsSync(join(repo, ARTIFACTS_DIR, name)), name);
       }
@@ -653,7 +669,7 @@ describe('runPipeline', () => {
     it('adds up the cost and turns of all attempts', () => {
       changeSource();
       const { deps } = fakes({ mutate: inOrder(mutationWith(mutant()), mutationWith()) });
-      runPipeline(options({ repairRounds: 1 }), deps);
+      runPipeline(options({ repairRounds: 1, mutationRepair: true }), deps);
       assert.match(artifact('report.md'), /14 turns/);
       assert.match(artifact('report.md'), /\$0\.5000/);
       assert.match(artifact('report.md'), /2 blocked tool calls/);
@@ -710,7 +726,7 @@ describe('runPipeline', () => {
           verify: inOrder(accepted, rejected),
           mutate: inOrder(mutationWith(mutant())),
         });
-        const result = runPipeline(options({ repairRounds: 1 }), deps);
+        const result = runPipeline(options({ repairRounds: 1, mutationRepair: true }), deps);
         expectAcceptedTree();
         assert.equal(result.outcome, 'tests_added');
         assert.equal(result.exitCode, 0);
@@ -725,7 +741,7 @@ describe('runPipeline', () => {
           claude: agentThatBreaksThings(claudeCalls, { type: 'result', subtype: 'error_max_turns', num_turns: 1 }),
           mutate: inOrder(mutationWith(mutant())),
         });
-        const result = runPipeline(options({ repairRounds: 1 }), deps);
+        const result = runPipeline(options({ repairRounds: 1, mutationRepair: true }), deps);
         expectAcceptedTree();
         assert.equal(result.outcome, 'tests_added');
         assert.match(artifact('report.md'), /turn limit/);

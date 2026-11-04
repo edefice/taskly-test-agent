@@ -14,7 +14,9 @@
 // the agent as data, so describe what is wrong. A copy stays in the artifacts.
 // --no-mutation skips the mutation check that follows an accepted run.
 // --repair-rounds gives the agent more attempts, at most 2, when the gate rejects its
-// tests or mutants survive. The default is 0, because each round costs money.
+// tests. The default is 0, because each round costs money.
+// --mutation-repair lets one of those rounds answer surviving mutants. It is off by default:
+// no real run has shown it to work, so a survivor is only a warning in the report.
 //
 // Bash runs tests written by the agent on this machine, so use this on your own code only.
 //
@@ -33,7 +35,7 @@ import { readTranscript } from '../.claude/skills/pr-report/scripts/read-transcr
 import { renderReport } from '../.claude/skills/pr-report/scripts/render-report.mjs';
 import { AGENT_RESULT_SCHEMA, crossCheckWithVerification, validateResult } from '../.claude/skills/pr-report/scripts/validate-result.mjs';
 import { mutationFeedback } from '../.claude/skills/test-verification/scripts/lib/mutation.mjs';
-import { gateFeedback, MAX_REPAIR_ROUNDS, nextRepair } from '../.claude/skills/test-verification/scripts/lib/repair-round.mjs';
+import { DEFAULT_MUTATION_ROUNDS, gateFeedback, MAX_MUTATION_ROUNDS, MAX_REPAIR_ROUNDS, nextRepair } from '../.claude/skills/test-verification/scripts/lib/repair-round.mjs';
 import { runMutation } from '../.claude/skills/test-verification/scripts/mutate-changed-lines.mjs';
 import { PACKAGES, runBaseline, runVerify } from '../.claude/skills/test-verification/scripts/verify-tests.mjs';
 
@@ -251,7 +253,7 @@ export function runPipeline(options, deps = {}) {
     log(`Agent needed: ${steps.needsAgent}`);
     log(`Skills preloaded: ${preloadedSkills.join(', ') || 'none'}`);
     log(`Feedback: ${steps.feedback === undefined ? 'none' : `${steps.feedback.length} characters`}`);
-    log(`Mutation check: ${options.noMutation ? 'off' : 'on'}. Repair rounds: ${options.repairRounds ?? 0}.`);
+    log(`Mutation check: ${options.noMutation ? 'off' : 'on'}. Repair rounds: ${options.repairRounds ?? 0}. Repair for mutants: ${options.mutationRepair ? 'on' : 'off'}.`);
     log(`Agent command: claude ${args.filter((arg) => !arg.startsWith('{')).join(' ')}`);
     log('Dry run: the agent and the tests did not run.');
     return { outcome: 'dry_run', exitCode: 0 };
@@ -340,7 +342,7 @@ export function runPipeline(options, deps = {}) {
       accepted = { result, verification, mutation, snapshot: snapshotTests(repo, verification) };
     }
 
-    const repair = nextRepair({ outcome, mutation, round, maxRounds, mutationRounds });
+    const repair = nextRepair({ outcome, mutation, round, maxRounds, mutationRounds, maxMutationRounds: options.mutationRepair ? MAX_MUTATION_ROUNDS : DEFAULT_MUTATION_ROUNDS });
     if (!repair) {
       if (outcome === 'tests_rejected' && accepted) return finishAccepted('The gate rejected a repair round, so the tests accepted earlier were kept.');
       return finish({ outcome, result, verification, mutation, ...reportInput() }, outcome === 'tests_rejected' ? 1 : 0);
@@ -362,6 +364,7 @@ export function parseOptions(argv) {
       'no-bash': { type: 'boolean', default: false },
       'no-mutation': { type: 'boolean', default: false },
       'repair-rounds': { type: 'string', default: '0' },
+      'mutation-repair': { type: 'boolean', default: false },
       'max-turns': { type: 'string', default: String(DEFAULT_MAX_TURNS) },
       'max-budget-usd': { type: 'string', default: String(DEFAULT_MAX_BUDGET_USD) },
     },
@@ -381,6 +384,7 @@ export function parseOptions(argv) {
     noBash: values['no-bash'],
     noMutation: values['no-mutation'],
     repairRounds,
+    mutationRepair: values['mutation-repair'],
     maxTurns,
     maxBudgetUsd,
   };

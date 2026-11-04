@@ -7,6 +7,9 @@ import { sanitizeLog } from './sanitize-log.mjs';
 export const MAX_REPAIR_ROUNDS = 2;
 // A mutant that cannot change behavior can never be caught, so another round would not help.
 export const MAX_MUTATION_ROUNDS = 1;
+// Off unless asked for. A repair round for mutants has not been shown to work on a real run,
+// so by default a survivor is only a warning in the report.
+export const DEFAULT_MUTATION_ROUNDS = 0;
 
 const MAX_TESTS_PER_FAILURE = 5;
 const MAX_LOG_PER_FAILURE = 1000;
@@ -18,12 +21,13 @@ const MAX_LOG_PER_FAILURE = 1000;
  * @param {number} state.round Repair rounds used so far.
  * @param {number} state.maxRounds Repair rounds allowed.
  * @param {number} state.mutationRounds Repair rounds used so far because of mutants.
+ * @param {number} [state.maxMutationRounds] Repair rounds allowed because of mutants.
  * @returns {'gate' | 'mutation' | null} Why to run again, or null to stop.
  */
-export function nextRepair({ outcome, mutation, round, maxRounds, mutationRounds }) {
+export function nextRepair({ outcome, mutation, round, maxRounds, mutationRounds, maxMutationRounds = DEFAULT_MUTATION_ROUNDS }) {
   if (round >= maxRounds) return null;
   if (outcome === 'tests_rejected') return 'gate';
-  if (outcome === 'tests_added' && mutationRounds < MAX_MUTATION_ROUNDS && actionableMutants(mutation).length > 0) return 'mutation';
+  if (outcome === 'tests_added' && mutationRounds < Math.min(maxMutationRounds, MAX_MUTATION_ROUNDS) && actionableMutants(mutation).length > 0) return 'mutation';
   return null;
 }
 

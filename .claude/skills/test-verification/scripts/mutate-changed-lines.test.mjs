@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, beforeEach, describe, it } from 'node:test';
 import { actionableMutants, chooseTargets, DATA_MUTATORS, MAX_CHANGED_LINES, MAX_FEEDBACK_MUTANTS, mutationFeedback, summarizeMutationReport, toRanges } from './lib/mutation.mjs';
-import { gateFeedback, MAX_MUTATION_ROUNDS, nextRepair } from './lib/repair-round.mjs';
+import { DEFAULT_MUTATION_ROUNDS, gateFeedback, MAX_MUTATION_ROUNDS, nextRepair } from './lib/repair-round.mjs';
 import { MUTATION_TIMEOUT_MS, runMutation, strykerConfig } from './mutate-changed-lines.mjs';
 
 const location = (line, startColumn = 1, endColumn = 2) => ({ start: { line, column: startColumn }, end: { line, column: endColumn } });
@@ -137,14 +137,27 @@ describe('mutationFeedback', () => {
 });
 
 describe('nextRepair', () => {
-  const state = (overrides = {}) => ({ outcome: 'tests_added', mutation: { mutants: [mutant()] }, round: 0, maxRounds: 2, mutationRounds: 0, ...overrides });
+  const state = (overrides = {}) => ({ outcome: 'tests_added', mutation: { mutants: [mutant()] }, round: 0, maxRounds: 2, mutationRounds: 0, maxMutationRounds: 1, ...overrides });
 
   it('repairs a rejection', () => {
     assert.equal(nextRepair(state({ outcome: 'tests_rejected', mutation: undefined })), 'gate');
   });
 
-  it('repairs surviving behavior mutants', () => {
+  it('repairs surviving behavior mutants when asked to', () => {
     assert.equal(nextRepair(state()), 'mutation');
+  });
+
+  it('by default leaves survivors as a warning, with rounds still free', () => {
+    assert.equal(DEFAULT_MUTATION_ROUNDS, 0);
+    assert.equal(nextRepair(state({ maxMutationRounds: undefined })), null);
+  });
+
+  it('cannot be asked for more mutant rounds than the limit', () => {
+    assert.equal(nextRepair(state({ round: 1, mutationRounds: 1, maxMutationRounds: 5 })), null);
+  });
+
+  it('by default still repairs a rejection', () => {
+    assert.equal(nextRepair(state({ outcome: 'tests_rejected', maxMutationRounds: undefined })), 'gate');
   });
 
   it('stops when no rounds are left, for either reason', () => {
