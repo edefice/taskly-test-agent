@@ -1,0 +1,11 @@
+{
+  "name": "taskly-test-agent-tools",
+  "private": true,
+  "description": "Tests for the unit test agent tooling. The application packages are in backend/ and frontend/.",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "test": "node --test \".claude/**/*.test.mjs\""
+  }
+}

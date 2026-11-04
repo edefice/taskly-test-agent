@@ -21,3 +21,7 @@ coverage/
 
 # macOS
 .DS_Store
+
+# Unit test agent: run artifacts and personal Claude Code settings
+.test-agent/
+.claude/settings.local.json
