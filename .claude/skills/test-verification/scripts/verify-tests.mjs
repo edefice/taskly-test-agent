@@ -138,6 +138,7 @@ function checkScope(repo, changes) {
 function checkRules(exec, repo, changes) {
   const violations = [];
   const existingTestsChanged = [];
+  const newTests = [];
   for (const { path } of changes) {
     const result = checkTestFile({
       path,
@@ -146,9 +147,10 @@ function checkRules(exec, repo, changes) {
       isTest: classifyTestPath(path) === 'test',
     });
     violations.push(...result.violations);
+    newTests.push(...result.newTests.map((title) => ({ path, title })));
     if (result.changedExistingLines > 0) existingTestsChanged.push({ path, changed_lines: result.changedExistingLines });
   }
-  return { violations, existingTestsChanged };
+  return { violations, existingTestsChanged, newTests };
 }
 
 function changedLinesFor(exec, repo, mergeBase, sourceFiles) {
@@ -270,6 +272,7 @@ export function runVerify({ repo, mergeBase, sourceFiles = [], baseline, exec = 
     changed_files: changes.map(({ path }) => ({ path, class: classifyTestPath(path) })),
     shared_test_support: changes.map(({ path }) => path).filter((path) => classifyTestPath(path) === 'shared-test-support'),
     existing_tests_changed: [],
+    new_tests: [],
     packages: {},
     failures,
   };
@@ -295,8 +298,9 @@ export function runVerify({ repo, mergeBase, sourceFiles = [], baseline, exec = 
     return finish();
   }
 
-  const { violations, existingTestsChanged } = checkRules(exec, repo, changes);
+  const { violations, existingTestsChanged, newTests } = checkRules(exec, repo, changes);
   report.existing_tests_changed = existingTestsChanged;
+  report.new_tests = newTests;
   if (violations.length > 0) {
     failures.push({ check: 'test-rules', message: `${violations.length} rule violation(s).`, violations });
   }

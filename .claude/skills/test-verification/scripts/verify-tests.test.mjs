@@ -227,6 +227,12 @@ describe('runVerify: passing', () => {
     assert.deepEqual(Object.keys(runVerify({ repo, exec }).packages), ['backend', 'frontend']);
   });
 
+  it('lists new tests, so the report can require a description of each', () => {
+    write(NEW_TEST, NEW_TEST_BODY);
+    const { exec } = fakeExec();
+    assert.deepEqual(runVerify({ repo, exec }).new_tests, [{ path: NEW_TEST, title: 'new behavior' }]);
+  });
+
   it('reports a changed line in an existing test, without failing', () => {
     write('backend/tests/router.test.ts', "it('lists tasks', () => { expect(a).toBe(1); expect(b).toBe(3); });\n");
     const { exec } = fakeExec();

@@ -91,6 +91,10 @@ export function crossCheckWithVerification(result, verification) {
   // A test file that only changes existing lines is explained by its justification instead.
   const undescribed = changed.filter(({ path, class: kind }) => kind === 'test' && !described.has(path) && !justified.has(path)).length;
   if (undescribed > 0) errors.push(`${undescribed} changed test file(s) have no test described in the result.`);
+  // A test that cannot be described in one sentence should not exist, so each one needs its own entry.
+  const describedTests = new Set(result.tests.map(({ file, name }) => `${file}\0${name}`));
+  const undescribedTests = (verification.new_tests ?? []).filter(({ path, title }) => !describedTests.has(`${path}\0${title}`)).length;
+  if (undescribedTests > 0) errors.push(`${undescribedTests} new test(s) have no entry in the result with their exact title.`);
   let unjustified = 0;
   for (const path of changedExisting) if (!justified.has(path)) unjustified += 1;
   if (unjustified > 0) errors.push(`${unjustified} changed existing test file(s) have no justification in the result.`);

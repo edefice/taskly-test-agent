@@ -23,8 +23,10 @@ const TEST_TITLE =
   /\b(?:it|test)(?:\.each\s*(?:`[^`]*`|\([\s\S]{0,4000}?\))\s*)?\(\s*(?:(['"])((?:\\.|(?!\1)[^\\\n])*)\1|`((?:\\.|[^`\\])*)`)/g;
 const ASSERTION = /\bexpect(?:\.\w+)?\s*\(/g;
 
+const IMPORT_STATEMENT = /^import\b[^;'"]*?(?:from\s+)?['"][^'"\n]+['"];?[ \t]*$/gm;
+
 function testTitles(content) {
-  return [...content.matchAll(TEST_TITLE)].map((match) => match[2] ?? match[3]);
+  return [...content.matchAll(TEST_TITLE)].map((match) => (match[2] ?? match[3]).replace(/\\(.)/g, '$1'));
 }
 
 function countMatches(content, pattern) {
@@ -82,10 +84,13 @@ export function checkTestFile({ path, before, after, isTest }) {
     }
   }
 
+  const titlesBefore = new Set(testTitles(previous));
   return {
     violations,
-    // Changing existing lines is allowed only when the pull request requires it,
-    // so the report has to show it and explain why.
-    changedExistingLines: before === null ? 0 : addedLines(after, previous).length,
+    newTests: isTest ? [...new Set(testTitles(after))].filter((title) => !titlesBefore.has(title)) : [],
+    // Changing existing lines is allowed only when the pull request requires it, so the
+    // report has to show it and explain why. A new test usually needs a new import, and
+    // that changes no behavior of the existing tests.
+    changedExistingLines: before === null ? 0 : addedLines(after, previous.replace(IMPORT_STATEMENT, '')).filter(({ text }) => text.trim() !== '').length,
   };
 }

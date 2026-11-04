@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { readTranscript } from './read-transcript.mjs';
-import { conclusionFor, MAX_REPORT_LENGTH, REPORT_MARKER, renderReport, safeCode, safeText } from './render-report.mjs';
+import { conclusionFor, MAX_REPORT_LENGTH, REPORT_MARKER, renderReport, safeCode, safeText, SOURCE_NOTE } from './render-report.mjs';
 import { AGENT_RESULT_SCHEMA, crossCheckWithVerification, readResultFile, validateAgainstSchema, validateResult } from './validate-result.mjs';
 
 const VALIDATE = fileURLToPath(new URL('./validate-result.mjs', import.meta.url));
@@ -151,6 +151,21 @@ describe('crossCheckWithVerification', () => {
   it('rejects a test file with no described test', () => {
     const errors = crossCheckWithVerification(validResult({ tests: [] }), verification());
     assert.match(errors.join('\n'), /no test described/);
+  });
+
+  it('accepts a new test described under its exact title', () => {
+    const report = verification({ new_tests: [{ path: TEST_FILE, title: 'reports ok' }] });
+    assert.deepEqual(crossCheckWithVerification(validResult(), report), []);
+  });
+
+  it('rejects a new test with no entry of its own, so tests cannot be grouped', () => {
+    const report = verification({ new_tests: [{ path: TEST_FILE, title: 'reports ok' }, { path: TEST_FILE, title: 'reports a failure' }] });
+    assert.match(crossCheckWithVerification(validResult(), report).join('\n'), /1 new test\(s\) have no entry/);
+  });
+
+  it('rejects a description under another file', () => {
+    const report = verification({ new_tests: [{ path: 'backend/tests/other.test.ts', title: 'reports ok' }] });
+    assert.match(crossCheckWithVerification(validResult(), report).join('\n'), /no entry/);
   });
 
   it('does not require a description for shared test support', () => {
@@ -361,7 +376,8 @@ describe('renderReport', () => {
     outcome: 'tests_added',
     result: validResult(),
     verification,
-    skills: ['backend-unit-tests'],
+    preloaded_skills: ['pr-change-analysis'],
+    invoked_skills: ['backend-unit-tests'],
     head_sha: 'abcdef1234567890',
     commit_sha: '1234567890abcdef',
     prompt_version: '1',
@@ -377,7 +393,7 @@ describe('renderReport', () => {
 
   it('shows what happened first', () => {
     const lines = markdown().split('\n');
-    assert.equal(lines[1], '### Unit test agent: 1 test(s) added to this pull request');
+    assert.equal(lines[1], '### Unit test agent: 1 test added to this pull request');
     assert.equal(lines[3], 'The health route had no tests.');
   });
 
@@ -385,7 +401,7 @@ describe('renderReport', () => {
     const text = markdown();
     for (const expected of [
       'The health route answers ok after a query succeeds.',
-      '`backend-unit-tests`',
+      'Skills preloaded: `pr-change-analysis`. Skills invoked: `backend-unit-tests`.',
       TEST_FILE,
       '50 tests: passed',
       '2 tests, 3 runs: passed',
@@ -406,7 +422,34 @@ describe('renderReport', () => {
   });
 
   it('says tests were verified, not added, when nothing was committed', () => {
-    assert.match(markdown({ commit_sha: undefined }), /1 test\(s\) written and verified/);
+    assert.match(markdown({ commit_sha: undefined }), /1 test written and verified/);
+  });
+
+  it('counts tests in plain words', () => {
+    const tests = [validResult().tests[0], validResult().tests[0], validResult().tests[0], validResult().tests[0]];
+    assert.match(markdown({ result: validResult({ tests }) }), /### Unit test agent: 4 tests added to this pull request/);
+    assert.match(markdown({ result: validResult({ tests }), commit_sha: undefined }), /4 tests written and verified/);
+    assert.doesNotMatch(markdown(), /\(s\)\s+added/);
+  });
+
+  it('separates what the gate verified from what the agent claims', () => {
+    assert.ok(markdown().includes(SOURCE_NOTE));
+    assert.match(SOURCE_NOTE, /reported by the agent and not verified/);
+    assert.match(SOURCE_NOTE, /come from the gate/);
+  });
+
+  it('has no claim to mark when the agent returned nothing', () => {
+    assert.ok(!renderReport({ outcome: 'agent_failed' }).markdown.includes(SOURCE_NOTE));
+  });
+
+  it('shows both skill lists, also when a list is empty', () => {
+    assert.match(markdown({ invoked_skills: [] }), /Skills preloaded: `pr-change-analysis`\. Skills invoked: none\./);
+  });
+
+  it('shows blocked tool calls, only when there are some', () => {
+    assert.match(markdown({ usage: { blocked_calls: 3 } }), /3 blocked tool calls/);
+    assert.match(markdown({ usage: { blocked_calls: 1 } }), /1 blocked tool call\b/);
+    assert.doesNotMatch(markdown({ usage: { blocked_calls: 0 } }), /blocked tool calls/);
   });
 
   it('explains a deliberate decision to write no tests', () => {
@@ -468,7 +511,7 @@ describe('renderReport', () => {
 
   it('shows suspected bugs', () => {
     const text = markdown({ result: validResult({ suspected_bugs: [{ file: 'backend/src/a.ts', expected: '404', actual: '500' }] }) });
-    assert.match(text, /Possible bugs in the application\n\n- `backend\/src\/a\.ts`: expected 404, actual 500/);
+    assert.match(text, /Possible bugs reported by the agent\n\n- `backend\/src\/a\.ts`: expected 404, actual 500/);
   });
 
   it('separates tests that were already red', () => {
@@ -514,7 +557,8 @@ describe('renderReport', () => {
           }),
           usage: { model: attack },
           prompt_version: attack,
-          skills: [attack],
+          preloaded_skills: [attack],
+          invoked_skills: [attack],
           analysis: { decision: { reason: attack }, flags: { symlinks: [attack] } },
           regression_check: { regressions: [attack], baseline_red: [attack] },
           verification: {

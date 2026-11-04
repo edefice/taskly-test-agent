@@ -1,5 +1,4 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Unit test agent result",
   "type": "object",
   "additionalProperties": false,
@@ -41,14 +40,14 @@
     "tests": {
       "type": "array",
       "maxItems": 200,
-      "description": "Every test you added. A test you cannot describe in one sentence about behavior should not exist.",
+      "description": "One entry for every test you added, with its exact title as name. Do not group tests. A test you cannot describe in one sentence about behavior should not exist.",
       "items": {
         "type": "object",
         "additionalProperties": false,
         "required": ["file", "name", "behavior"],
         "properties": {
           "file": { "type": "string", "minLength": 1, "maxLength": 300 },
-          "name": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "name": { "type": "string", "minLength": 1, "maxLength": 300 },
           "behavior": { "type": "string", "minLength": 1, "maxLength": 300 }
         }
       }

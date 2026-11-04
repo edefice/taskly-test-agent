@@ -299,6 +299,22 @@ describe('analyzeChanges', () => {
     assert.equal(analyze({ limits: { maxFiles: 10, maxLines: 10 } }).decision.reason_code, 'too_large');
   });
 
+  it('does not call a large change to configuration too large, because the agent is not needed', () => {
+    write('.claude/tool.mjs', 'x\n'.repeat(500));
+    write('docs/guide.md', 'x\n'.repeat(500));
+    commitAll();
+    assert.equal(analyze({ limits: { maxFiles: 1, maxLines: 10 } }).decision.reason_code, 'no_testable_changes');
+  });
+
+  it('does not count configuration toward the limit when source also changed', () => {
+    write('.claude/tool.mjs', 'x\n'.repeat(500));
+    write('backend/src/a.ts', 'export const a = 1;\n');
+    commitAll();
+    const { decision } = analyze({ limits: { maxFiles: 1, maxLines: 10 } });
+    assert.equal(decision.reason_code, 'source_changed');
+    assert.equal(decision.needs_agent, true);
+  });
+
   it('flags symlinks and unusual file names', () => {
     symlinkSync('/proc/self/environ', join(repo, 'backend/tests/link.test.ts'));
     write('backend/src/$(touch pwned).ts', 'export const a = 1;\n');

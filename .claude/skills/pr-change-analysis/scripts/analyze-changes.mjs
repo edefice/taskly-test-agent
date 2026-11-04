@@ -63,6 +63,8 @@ const RUNTIME_CODE = /^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:function|
 
 const UNUSUAL_NAME = /[\u0000-\u001f\u007f`$<>]/;
 
+const REVIEWED_KINDS = ['source', 'no-logic', 'test', 'test-support'];
+
 const STATUS_NAMES = { A: 'added', M: 'modified', D: 'deleted', R: 'renamed', C: 'copied', T: 'typechange' };
 
 const matchesAny = (patterns, path) => patterns.some((pattern) => pattern.test(path));
@@ -176,15 +178,16 @@ function decide(files, sourceFiles, limits) {
   if (files.length === 0) {
     return { needs_agent: false, reason_code: 'no_changes', reason: 'The diff is empty.' };
   }
-  const reviewedLines = files
-    .filter((file) => !['generated', 'asset'].includes(file.kind))
-    .reduce((sum, file) => sum + file.additions + file.deletions, 0);
-  if (files.length > limits.maxFiles || reviewedLines > limits.maxLines) {
+  // The limit protects the cost of the agent, so it counts only what the agent would read.
+  // A large change to configuration or documentation does not need the agent at all.
+  const reviewed = files.filter((file) => REVIEWED_KINDS.includes(file.kind));
+  const reviewedLines = reviewed.reduce((sum, file) => sum + file.additions + file.deletions, 0);
+  if (sourceFiles.length > 0 && (reviewed.length > limits.maxFiles || reviewedLines > limits.maxLines)) {
     return {
       needs_agent: false,
       reason_code: 'too_large',
       reason:
-        `The diff has ${files.length} files and ${reviewedLines} changed lines, over the limit of ` +
+        `The change has ${reviewed.length} code and test files and ${reviewedLines} changed lines, over the limit of ` +
         `${limits.maxFiles} files or ${limits.maxLines} lines. Review test coverage by hand.`,
     };
   }

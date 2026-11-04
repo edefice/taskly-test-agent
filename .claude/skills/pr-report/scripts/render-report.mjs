@@ -13,6 +13,7 @@ import { parseArgs } from 'node:util';
 import { clean } from '../../test-verification/scripts/lib/sanitize-log.mjs';
 
 export const REPORT_MARKER = '<!-- unit-test-agent-report -->';
+export const SOURCE_NOTE = 'Test descriptions and possible bugs are reported by the agent and not verified. Test results, coverage and the check result come from the gate.';
 export const MAX_REPORT_LENGTH = 60000;
 const MAX_LIST_ITEMS = 30;
 const RUN_URL = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/actions\/runs\/\d+(?:\/attempts\/\d+)?$/;
@@ -61,11 +62,13 @@ export function conclusionFor(input) {
   return 'neutral';
 }
 
+const countTests = (count) => `${count} ${count === 1 ? 'test' : 'tests'}`;
+
 function headline(input) {
-  const testCount = input.result?.tests?.length ?? 0;
+  const tests = countTests(input.result?.tests?.length ?? 0);
   switch (input.outcome) {
     case 'tests_added':
-      return input.commit_sha ? `${testCount} test(s) added to this pull request` : `${testCount} test(s) written and verified`;
+      return input.commit_sha ? `${tests} added to this pull request` : `${tests} written and verified`;
     case 'no_tests_needed':
       return 'No tests needed';
     case 'skipped':
@@ -125,7 +128,7 @@ function testResultRows(packages) {
     const typecheck = entry.typecheck ? checkLabel(entry.typecheck.passed) : 'not run';
     rows.push(`| ${safeCode(name)} | ${newTests} | ${full} | ${typecheck} |`);
   }
-  return rows.length > 0 ? ['| Package | New tests | Whole package | Typecheck |', '|---|---|---|---|', ...rows] : [];
+  return rows.length > 0 ? ['| Package | Changed test files | Whole package | Typecheck |', '|---|---|---|---|', ...rows] : [];
 }
 
 const percent = (metric) => (Number.isFinite(metric?.pct) ? `${metric.pct}%` : 'n/a');
@@ -170,6 +173,8 @@ function runFacts(input) {
   facts.push(`Prompt version ${safeCode(input.prompt_version ?? 'unknown')}`);
   if (Number.isFinite(input.usage?.turns)) facts.push(`${input.usage.turns} turns`);
   if (Number.isFinite(input.usage?.cost_usd)) facts.push(`$${input.usage.cost_usd.toFixed(4)}`);
+  // A blocked call can be an honest mistake or the sign of an injection attempt.
+  if (input.usage?.blocked_calls > 0) facts.push(`${input.usage.blocked_calls} blocked tool ${input.usage.blocked_calls === 1 ? 'call' : 'calls'}`);
   return facts.join(' · ');
 }
 
@@ -180,9 +185,10 @@ function runFacts(input) {
  * @param {object} [input.analysis] Output of analyze-changes.
  * @param {object} [input.result] The validated agent result.
  * @param {object} [input.verification] Output of verify-tests.
- * @param {string[]} [input.skills] Skills seen in the transcript.
+ * @param {string[]} [input.preloaded_skills] Skills that code placed in the prompt.
+ * @param {string[]} [input.invoked_skills] Skills the transcript shows the agent calling.
  * @param {{ regressions: string[], baseline_red?: string[] }} [input.regression_check]
- * @param {{ model?: string, turns?: number, cost_usd?: number }} [input.usage]
+ * @param {{ model?: string, turns?: number, cost_usd?: number, blocked_calls?: number }} [input.usage]
  */
 export function renderReport(input) {
   if (!OUTCOMES.includes(input.outcome)) throw new Error('Unknown outcome.');
@@ -202,7 +208,7 @@ export function renderReport(input) {
   lines.push(...section('New tests', limited(result?.tests ?? [], ({ file, name, behavior }) => `- ${safeCode(file)} ${safeCode(name)}: ${safeText(behavior, 300)}`)));
   lines.push(
     ...section(
-      'Possible bugs in the application',
+      'Possible bugs reported by the agent',
       limited(result?.suspected_bugs ?? [], ({ file, expected, actual }) => `- ${safeCode(file)}: expected ${safeText(expected, 300)}, actual ${safeText(actual, 300)}`),
     ),
   );
@@ -230,8 +236,11 @@ export function renderReport(input) {
   const flags = input.analysis?.flags;
   lines.push(...section('Symbolic links changed in this pull request', limited(flags?.symlinks ?? [], (path) => `- ${safeCode(path)}`)));
 
-  const skills = input.skills ?? [];
-  if (skills.length > 0) lines.push(`Skills used: ${skills.map((skill) => safeCode(skill)).join(', ')}`, '');
+  const skillList = (skills) => (skills?.length > 0 ? skills.map((skill) => safeCode(skill)).join(', ') : 'none');
+  if (input.preloaded_skills || input.invoked_skills) {
+    lines.push(`Skills preloaded: ${skillList(input.preloaded_skills)}. Skills invoked: ${skillList(input.invoked_skills)}.`, '');
+  }
+  if (result) lines.push(SOURCE_NOTE, '');
   lines.push(`<sub>${runFacts(input)}</sub>`, '');
 
   let markdown = lines.join('\n');
