@@ -65,6 +65,14 @@ jobs:
         with:
           name: gate-round-${{ inputs.previous }}
           path: ${{ runner.temp }}/artifacts/gate-round-${{ inputs.previous }}
+      # The isolation of subprocesses needs bubblewrap, and without it Claude Code does not start.
+      # The action installs it only for content from users with no write access, which this
+      # workflow does not allow. These are the commands of the action, and like there, this is best effort.
+      - name: Install what the isolation of subprocesses needs
+        continue-on-error: true
+        run: |
+          for i in 1 2 3; do sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends bubblewrap socat && break; echo "apt-get attempt $i failed, retrying..."; sleep 5; done
+          if [ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0; fi
       - name: Prepare the attempt
         id: prepare
         env:
@@ -77,10 +85,13 @@ jobs:
         continue-on-error: true
         uses: anthropics/claude-code-action@4845bacbb38b3c4b15d948f035349786f678e068 # v1.0.267
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           UNIT_TEST_AGENT_ENFORCE: '1'
           CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1'
         with:
+          # An input and not env: every step inside the action sees the env of this step, also
+          # the one that installs its packages. The input reaches the step that starts Claude
+          # Code, and the step for inline comments, which the last line here turns off.
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
           prompt: ${{ steps.prepare.outputs.prompt }}
           claude_args: ${{ steps.prepare.outputs.claude_args }}
@@ -91,7 +102,7 @@ jobs:
           ROUND: ${{ inputs.round }}
           OUT: ${{ runner.temp }}/out
           EXECUTION_FILE: ${{ steps.agent.outputs.execution_file }}
-          AGENT_OUTCOME: ${{ steps.agent.outputs.conclusion }}
+          AGENT_OUTCOME: ${{ steps.agent.outcome }}
         run: node "$TOOLS/scripts/ci/collect-agent-output.mjs"
       - name: Scan the output for the key
         id: scan

@@ -10,7 +10,7 @@ export const AGENT_ACTION = 'anthropics/claude-code-action';
 const PINNED = /^[\w.-]+\/[\w./-]+@[0-9a-f]{40}$/;
 const UNTRUSTED_IN_SCRIPT = /\$\{\{[^}]*(?:github\.event|github\.head_ref|inputs\.)[^}]*\}\}/;
 // The only commands the job with the key may run. Each one is for tools from the base commit.
-const AGENT_JOB_COMMANDS = [/^node "\$TOOLS\/scripts\/ci\/[\w-]+\.mjs"/, /^mv agent-tools "\$RUNNER_TEMP\/tools"$/, /^echo "TOOLS=\$RUNNER_TEMP\/tools" >> "\$GITHUB_ENV"$/];
+const AGENT_JOB_COMMANDS = [/^node "\$TOOLS\/scripts\/ci\/[\w-]+\.mjs"/, /^mv agent-tools "\$RUNNER_TEMP\/tools"$/, /^echo "TOOLS=\$RUNNER_TEMP\/tools" >> "\$GITHUB_ENV"$/, /^for i in 1 2 3; do sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends bubblewrap socat && break; echo "apt-get attempt \$i failed, retrying\.\.\."; sleep 5; done$/, /^if \[ -f \/proc\/sys\/kernel\/apparmor_restrict_unprivileged_userns \]; then sudo sysctl -w kernel\.apparmor_restrict_unprivileged_userns=0; fi$/];
 const INDENT = /^( *)/;
 
 const indentOf = (line) => INDENT.exec(line)[1].length;
@@ -97,8 +97,10 @@ export function checkWorkflow(text, file = 'workflow') {
 }
 
 /**
- * The rules that keep the key where it belongs. It may appear in the job of one workflow, as the
- * env of two steps, and in the workflow that calls it, as one passed value.
+ * The rules that keep the key where it belongs. It may appear in the job of one workflow, in two
+ * steps, and in the workflow that calls it, as one passed value. The action gets it as an input
+ * and not as env, because every step inside the action sees the env of the step that uses it,
+ * also the one that installs its packages. The scan gets it as env.
  * @param {Record<string, string>} files File name to content, for all workflows.
  * @returns {string[]}
  */
@@ -132,11 +134,17 @@ export function checkSecretIsolation(files, roundFile = 'test-agent-round.yml') 
   const action = holders.find((step) => step.uses?.startsWith(`${AGENT_ACTION}@`));
   const scan = holders.find((step) => step.run?.some((line) => line.includes('scan-secret.mjs')));
   if (holders.length !== 2 || !action || !scan) errors.push(`${roundFile}: the key must be in exactly two steps, the action and the scan, and it is in ${holders.length}.`);
-  for (const step of holders) {
+  const onlyLine = (step, pattern) => {
     const uses = step.lines.filter((line) => /secrets\./.test(line));
-    if (uses.length !== 1 || !new RegExp(`^ {10}${SECRET_NAME}: \\$\\{\\{ secrets\\.${SECRET_NAME} \\}\\}$`).test(uses[0])) {
-      errors.push(`${roundFile}: step ${step.name ?? step.id}: the key must be one env entry of this step, and nothing else.`);
-    }
+    return uses.length === 1 && pattern.test(uses[0]);
+  };
+  if (action && !onlyLine(action, new RegExp(`^ {10}anthropic_api_key: \\$\\{\\{ secrets\\.${SECRET_NAME} \\}\\}$`))) {
+    errors.push(`${roundFile}: the action must get the key as the input anthropic_api_key, and in no other way, because the steps inside it see its env.`);
+  }
+  // The step for inline comments is the only other step inside the action that reads the input.
+  if (action && !/classify_inline_comments: 'false'/.test(action.text)) errors.push(`${roundFile}: the action must have classify_inline_comments off, because that step would get the key.`);
+  if (scan && !onlyLine(scan, new RegExp(`^ {10}${SECRET_NAME}: \\$\\{\\{ secrets\\.${SECRET_NAME} \\}\\}$`))) {
+    errors.push(`${roundFile}: the scan must get the key as one env entry, and in no other way.`);
   }
   if (scan) {
     if (!/^node "\$TOOLS\/scripts\/ci\/scan-secret\.mjs"/.test(scan.run[0] ?? '') || scan.run.length !== 1) errors.push(`${roundFile}: the scan must only run the script from the base commit.`);
