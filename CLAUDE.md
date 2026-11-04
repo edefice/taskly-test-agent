@@ -61,8 +61,10 @@ The versions are exact, and a test keeps this table equal to `package.json`.
 
 These are reported and not fixed yet. Do not add tests that expect the current behavior.
 
-- `backend/src/features/todos/validators.ts:22`: the ID schema allows values up to `Number.MAX_SAFE_INTEGER`, but the column is a 32-bit `Int`. `GET`, `PATCH` and `DELETE /api/todos/2147483648` return 500. Expected: 404 or 422.
-- `backend/src/features/todos/validators.ts:22`: `z.coerce.number()` accepts `1e0`, `0x1` and `" 1"` as ID 1. Expected: 422.
+- B1, `backend/src/features/todos/validators.ts:22`: the ID schema allows values up to `Number.MAX_SAFE_INTEGER`, but the column is a 32-bit `Int`. `GET`, `PATCH` and `DELETE /api/todos/2147483648` return 500. Expected: 404 or 422.
+- B2, `backend/src/features/todos/validators.ts:22`: `z.coerce.number()` accepts `1e0`, `0x1` and `" 1"` as ID 1. Expected: 422.
+- B3, `backend/src/core/lifespan.ts:14-15`: when the port is taken, Express 5 calls the `listen` callback with the error, so `resolve` wins over `reject`, and `start()` rejects with a `TypeError` from `server.address()`. Expected: it rejects with `EADDRINUSE`.
+- B4, `backend/src/core/lifespan.ts:29-31`: when startup fails and `$disconnect()` fails too, the second error replaces the first. Expected: the caller gets the startup error.
 
 ## Agent and skills
 
@@ -92,4 +94,10 @@ Add to this list after each mistake.
 - A model can skip a skill it is told to load. It did in a real run, and a passing gate did not show it. What must reach the agent goes in the prompt through code: `build-prompt.mjs` picks the skills for writing tests from `source_files`.
 - An example in a skill must not come from a module that still needs tests. The agent could copy it, and the coverage would look like its own work.
 - Claude Code removes Grep and Glob when Bash is present, unless `--tools` names them. Do not name Read, Grep or Glob in `--allowedTools`, because that approves reads outside the repository.
+- In zsh, an unquoted `?` in a URL or `*` in a flag is a glob, and `no matches found` stops the whole command. Quote such arguments.
+- In zsh, `path` is tied to `PATH`, so `path=$1` in a shell function removes every command that follows. Use another name.
+- BSD `sed` does not understand `\t` or `\x1b`, and `gh run view --log` writes color codes as the literal text `^[[`. A filter that finds nothing can mean the filter is wrong, so check the raw text before you trust an empty result.
+- Node 22 prints a TAP summary by default (`# tests 874`) and Node 24 prints spec (`ℹ tests 874`). Use the exit code in scripts, not the text.
+- Stryker reports 35 of 35 and a test can still be weak: it does not remove props, calls or fields, so a mock that ignores a prop hides a gap. On those tests, 4 of 6 hand-made mutations survived. Do not present a mutation score as proof of test quality.
+- A check of the agent's words per file raises a false alarm on a true "I added tests, the existing ones are unchanged". Compare each existing test by itself.
 - The guard hook reads command text, so any Bash command containing `git` followed by a word can be blocked, even in a string. If that is a false alarm, use the Grep tool or a file for the text.
