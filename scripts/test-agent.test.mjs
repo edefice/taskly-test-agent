@@ -39,6 +39,11 @@ describe('parseOptions', () => {
     assert.deepEqual(parseOptions(['--files', 'a.ts, b.ts']).files, ['a.ts', 'b.ts']);
   });
 
+  it('reads the feedback file path, and has none by default', () => {
+    assert.equal(parseOptions(['--base', 'main', '--feedback', 'why.txt']).feedback, 'why.txt');
+    assert.equal(parseOptions(['--base', 'main']).feedback, undefined);
+  });
+
   for (const [name, args] of [
     ['neither mode', []],
     ['both modes', ['--base', 'main', '--files', 'a.ts']],
@@ -293,6 +298,58 @@ describe('runPipeline', () => {
     assert.match(prompt, /backend\/src\/a\.ts/);
     assert.match(prompt, /When tests are not needed/);
     assert.equal(artifact('prompt.txt'), prompt);
+  });
+
+  describe('feedback', () => {
+    const TEXT = 'The test uses a fixed port.\n';
+    const feedbackFile = (content = TEXT) => {
+      const path = join(root, `feedback-${Math.random().toString(16).slice(2)}.txt`);
+      writeFileSync(path, content);
+      return path;
+    };
+
+    it('reaches the agent in a data tag, and a copy stays in the artifacts', () => {
+      const { deps, calls } = fakes();
+      runPipeline(options({ base: undefined, files: ['backend/src/a.ts'], feedback: feedbackFile() }), deps);
+      assert.match(calls.claude[0][1], /<untrusted-feedback-[0-9a-f]+>\nThe test uses a fixed port\./);
+      assert.equal(artifact('feedback.txt'), TEXT);
+      assert.equal(artifact('prompt.txt'), calls.claude[0][1]);
+    });
+
+    it('works on a diff run too, which is what a repair round in CI uses', () => {
+      changeSource();
+      const { deps, calls } = fakes();
+      runPipeline(options({ feedback: feedbackFile() }), deps);
+      assert.match(calls.claude[0][1], /<untrusted-analysis-[0-9a-f]+>/);
+      assert.match(calls.claude[0][1], /<untrusted-feedback-[0-9a-f]+>/);
+    });
+
+    it('leaves no trace in a run without it', () => {
+      changeSource();
+      const { deps, calls } = fakes();
+      runPipeline(options(), deps);
+      assert.doesNotMatch(calls.claude[0][1], /untrusted-feedback/);
+      assert.equal(existsSync(join(repo, ARTIFACTS_DIR, 'feedback.txt')), false);
+    });
+
+    for (const [name, path, message] of [
+      ['a missing file', () => join(root, 'no-such-file.txt'), /Cannot read the feedback file .*ENOENT/],
+      ['an empty file', () => feedbackFile(' \n'), /feedback file is empty/],
+    ]) {
+      it(`refuses ${name} before spending anything`, () => {
+        const { deps, calls } = fakes();
+        assert.throws(() => runPipeline(options({ base: undefined, files: ['backend/src/a.ts'], feedback: path() }), deps), message);
+        assert.deepEqual(calls.claude, []);
+        assert.deepEqual(calls.baseline, []);
+      });
+    }
+
+    it('a dry run reports its size and starts nothing', () => {
+      const { deps, calls } = fakes();
+      runPipeline(options({ base: undefined, files: ['backend/src/a.ts'], feedback: feedbackFile(), dryRun: true }), deps);
+      assert.ok(calls.logs.includes(`Feedback: ${TEXT.length} characters`));
+      assert.deepEqual(calls.claude, []);
+    });
   });
 
   it('does not start the agent when the analysis says it is not needed', () => {

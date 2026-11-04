@@ -5,9 +5,12 @@
 //
 //   npm run test-agent -- --base main [--dry-run] [--no-bash]
 //   npm run test-agent -- --files backend/src/api/health.ts,frontend/src/lib/http.ts
+//   npm run test-agent -- --files backend/src/api/health.ts --feedback why-rejected.txt
 //
 // --dry-run needs no API key and does not run the agent or the tests.
 // --no-bash removes Bash from the agent, as in CI.
+// --feedback gives the agent a file that says why a previous attempt was rejected. It reaches
+// the agent as data, so describe what is wrong. A copy stays in the artifacts.
 //
 // Bash runs tests written by the agent on this machine, so use this on your own code only.
 //
@@ -125,26 +128,42 @@ function validateFiles(repo, files) {
   }
 }
 
+/** Fails before anything is spent. An empty file is a mistake, not a run without feedback. */
+function readFeedback(path) {
+  if (path === undefined) return undefined;
+  let text;
+  try {
+    text = readFileSync(path, 'utf8');
+  } catch (error) {
+    throw new UsageError(`Cannot read the feedback file ${path}: ${error.code ?? error.message}`);
+  }
+  if (text.trim() === '') throw new UsageError(`The feedback file is empty: ${path}`);
+  return text;
+}
+
 function plan(options, repo) {
+  const feedback = readFeedback(options.feedback);
   if (options.files) {
     validateFiles(repo, options.files);
     return {
       needsAgent: true,
       analysis: null,
+      feedback,
       sourceFiles: options.files,
       mergeBase: undefined,
       packages: PACKAGES.filter((name) => options.files.some((path) => path.startsWith(`${name}/`))),
-      prompt: buildFilesPrompt({ files: options.files, root: TOOLS_ROOT }),
+      prompt: buildFilesPrompt({ files: options.files, feedback, root: TOOLS_ROOT }),
     };
   }
   const analysis = analyzeChanges({ cwd: repo, base: options.base });
   return {
     needsAgent: analysis.decision.needs_agent,
     analysis,
+    feedback,
     sourceFiles: analysis.source_files,
     mergeBase: analysis.merge_base,
     packages: PACKAGES.filter((name) => analysis.areas.includes(name)),
-    prompt: buildDiffPrompt({ analysis, root: TOOLS_ROOT }),
+    prompt: buildDiffPrompt({ analysis, feedback, root: TOOLS_ROOT }),
   };
 }
 
@@ -196,6 +215,7 @@ export function runPipeline(options, deps = {}) {
     log(`Source files: ${steps.sourceFiles.join(', ') || 'none'}`);
     log(`Packages: ${steps.packages.join(', ') || 'none'}`);
     log(`Agent needed: ${steps.needsAgent}`);
+    log(`Feedback: ${steps.feedback === undefined ? 'none' : `${steps.feedback.length} characters`}`);
     log(`Agent command: claude ${args.filter((arg) => !arg.startsWith('{')).join(' ')}`);
     log('Dry run: the agent and the tests did not run.');
     return { outcome: 'dry_run', exitCode: 0 };
@@ -224,6 +244,7 @@ export function runPipeline(options, deps = {}) {
   rmSync(artifacts, { recursive: true, force: true });
   mkdirSync(artifacts, { recursive: true });
   writeFileSync(join(artifacts, 'prompt.txt'), steps.prompt);
+  if (steps.feedback !== undefined) writeFileSync(join(artifacts, 'feedback.txt'), steps.feedback);
   log(`Taking a baseline of ${steps.packages.join(', ')}...`);
   const baselineReport = baseline({ repo, packages: steps.packages });
   writeFileSync(join(artifacts, 'baseline.json'), JSON.stringify(baselineReport, null, 2));
@@ -255,6 +276,7 @@ export function parseOptions(argv) {
     options: {
       base: { type: 'string' },
       files: { type: 'string' },
+      feedback: { type: 'string' },
       'dry-run': { type: 'boolean', default: false },
       'no-bash': { type: 'boolean', default: false },
       'max-turns': { type: 'string', default: String(DEFAULT_MAX_TURNS) },
@@ -269,6 +291,7 @@ export function parseOptions(argv) {
   return {
     base: values.base,
     files: values.files ? values.files.split(',').map((path) => path.trim()).filter(Boolean) : undefined,
+    feedback: values.feedback,
     dryRun: values['dry-run'],
     noBash: values['no-bash'],
     maxTurns,
