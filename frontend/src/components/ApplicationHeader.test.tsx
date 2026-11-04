@@ -9,7 +9,9 @@ beforeEach(() => vi.clearAllMocks())
 it('provides a home link, application title and task list description', () => {
   render(<ApplicationHeader />)
   const header = screen.getByRole('banner')
-  const link = within(header).getByRole('link', { name: 'Taskly App Node — home' })
+  const link = within(header).getByRole('link', {
+    name: 'Taskly App Node — home',
+  })
   expect(link).toHaveAttribute('href', '/')
   expect(link).toHaveTextContent('Taskly App Node')
   expect(vi.mocked(Heading).mock.calls[0][0]).toEqual(
