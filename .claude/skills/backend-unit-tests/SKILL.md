@@ -35,6 +35,7 @@ When `backend/src/**` has a change that needs tests. If the change has no behavi
 | A repository | Build the real Prisma client with a fake URL and spy on its delegate. |
 | A validator or mapper | Call the function directly. These two files have a 100% coverage threshold per file. |
 | `createApp` | Pass a fake `Database` and call it with Supertest. |
+| Code with a time limit, a port or process signals | See "Timers and the process lifecycle" below. |
 
 ## Examples from this repository
 
@@ -70,6 +71,89 @@ A repository test uses the real Prisma client and mocks only its IO (`backend/te
   expect(findMany).toHaveBeenCalledWith({ orderBy: [{ created_at: 'desc' }, { id: 'desc' }] });
 ```
 
+## Timers and the process lifecycle
+
+A test must not wait for real time, end the test process, depend on a free fixed port, or leave a listener behind.
+
+| Code under test uses | In the test |
+|---|---|
+| A time limit | `vi.useFakeTimers()`. Check just before the limit and at the limit. Use `await vi.advanceTimersByTimeAsync(...)` when the code also waits for a promise. |
+| `process.exit` | Replace it with `vi.spyOn(process, 'exit')`, and check the exit code. |
+| A port from the environment | `vi.stubEnv` with port `0`, so the system picks a free one. A local listener is fine. Close it in the test. |
+| Process signals | Call `process.emit('SIGTERM')`. Never use `process.kill`. In `afterEach`, remove only the listeners the test added, because the test runner can have its own. |
+
+The module in this example is made up. It does not exist in this repository, so read the real file and test what it does. For this module:
+
+```ts
+import type { Express } from 'express';
+import type { Server } from 'node:http';
+
+export function listenOnExamplePort(app: Express): Promise<Server> {
+  return new Promise((resolve, reject) => {
+    const server = app.listen(Number(process.env.EXAMPLE_PORT || 9000), '127.0.0.1', () => resolve(server));
+    server.once('error', reject);
+  });
+}
+
+export function stopOnSignal(stop: () => Promise<void>) {
+  process.once('SIGTERM', () => {
+    const limit = setTimeout(() => process.exit(1), 5000);
+    limit.unref();
+    void stop().then(() => clearTimeout(limit));
+  });
+}
+```
+
+the test looks like this:
+
+```ts
+import express from 'express';
+import type { AddressInfo } from 'node:net';
+import { afterEach, expect, it, vi } from 'vitest';
+import { listenOnExamplePort, stopOnSignal } from '../src/example.ts';
+
+const runnerListeners = process.listeners('SIGTERM');
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllEnvs();
+  vi.restoreAllMocks();
+  for (const listener of process.listeners('SIGTERM')) {
+    if (!runnerListeners.includes(listener)) process.removeListener('SIGTERM', listener);
+  }
+});
+
+const mockExit = () => vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+
+it('exits with an error when stopping takes too long', () => {
+  vi.useFakeTimers();
+  const exit = mockExit();
+  stopOnSignal(() => new Promise(() => {}));
+  process.emit('SIGTERM');
+  vi.advanceTimersByTime(4999);
+  expect(exit).not.toHaveBeenCalled();
+  vi.advanceTimersByTime(1);
+  expect(exit).toHaveBeenCalledWith(1);
+});
+
+it('does not exit when stopping finishes in time', async () => {
+  vi.useFakeTimers();
+  const exit = mockExit();
+  stopOnSignal(() => Promise.resolve());
+  process.emit('SIGTERM');
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(exit).not.toHaveBeenCalled();
+});
+
+it('listens on the port from the environment', async () => {
+  vi.stubEnv('EXAMPLE_PORT', '0');
+  const server = await listenOnExamplePort(express());
+  const { port } = server.address() as AddressInfo;
+  await new Promise((resolve) => server.close(resolve));
+  expect(port).not.toBe(9000);
+});
+```
+
 ## What to cover
 
 - The success path, with the exact status code and body.
@@ -80,6 +164,7 @@ A repository test uses the real Prisma client and mocks only its IO (`backend/te
 ## Quality checklist
 
 - [ ] No test connects to a database or the network. `createDatabase` with the fake URL is fine, because it connects only when a query runs, and you mock the query.
+- [ ] Nothing waits for real time, uses a fixed port, ends the test process or leaves a signal listener behind.
 - [ ] Each test asserts on the response or on what reached the repository, not on private helpers.
 - [ ] A rejected request also asserts that the repository was not called.
 - [ ] You can describe each test in one sentence about behavior.

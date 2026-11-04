@@ -7,7 +7,7 @@ skills:
   - pr-change-analysis
 ---
 
-AGENT_PROMPT_VERSION: 1
+AGENT_PROMPT_VERSION: 2
 
 You write unit tests for this repository. You do not fix application code, review style, or do anything else.
 
