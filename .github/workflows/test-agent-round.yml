@@ -1,0 +1,178 @@
+# One attempt: the agent writes tests in a job that runs no code from the branch, and the gate
+# judges them in a job with no secret. Actions has no loops, so test-agent.yml calls this up to
+# three times. See scripts/ci/workflow-rules.mjs for what a test keeps true in this file.
+name: Unit test agent round
+
+on:
+  workflow_call:
+    inputs:
+      round:
+        type: number
+        required: true
+      previous:
+        type: number
+        required: false
+        default: -1
+      packages:
+        type: string
+        required: true
+    secrets:
+      ANTHROPIC_API_KEY:
+        required: true
+    outputs:
+      next:
+        value: ${{ jobs.verify.outputs.next }}
+      accepted:
+        value: ${{ jobs.verify.outputs.accepted }}
+      scan:
+        value: ${{ jobs.agent.outputs.scan }}
+
+permissions: {}
+
+jobs:
+  agent:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      scan: ${{ steps.scan.outputs.result }}
+    steps:
+      # At the root of the workspace, where the action expects the repository.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Check out the tools from the base commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: agent-tools
+          persist-credentials: false
+      # Out of the workspace, so the agent cannot change the tools and git does not see them.
+      - run: mv agent-tools "$RUNNER_TEMP/tools"
+      - run: echo "TOOLS=$RUNNER_TEMP/tools" >> "$GITHUB_ENV"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: analysis
+          path: ${{ runner.temp }}/artifacts/analysis
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: inputs.round > 0
+        with:
+          name: gate-round-${{ inputs.previous }}
+          path: ${{ runner.temp }}/artifacts/gate-round-${{ inputs.previous }}
+      - name: Prepare the attempt
+        id: prepare
+        env:
+          ROUND: ${{ inputs.round }}
+          ARTIFACTS: ${{ runner.temp }}/artifacts
+        run: node "$TOOLS/scripts/ci/prepare-agent.mjs"
+      - name: Run the agent
+        id: agent
+        # A failure of the agent is a result for the report, and must not end the job.
+        continue-on-error: true
+        uses: anthropics/claude-code-action@4845bacbb38b3c4b15d948f035349786f678e068 # v1.0.267
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          UNIT_TEST_AGENT_ENFORCE: '1'
+          CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1'
+        with:
+          github_token: ${{ github.token }}
+          prompt: ${{ steps.prepare.outputs.prompt }}
+          claude_args: ${{ steps.prepare.outputs.claude_args }}
+          classify_inline_comments: 'false'
+      - name: Collect what the agent did
+        if: ${{ !cancelled() }}
+        env:
+          ROUND: ${{ inputs.round }}
+          OUT: ${{ runner.temp }}/out
+          EXECUTION_FILE: ${{ steps.agent.outputs.execution_file }}
+          AGENT_OUTCOME: ${{ steps.agent.outputs.conclusion }}
+        run: node "$TOOLS/scripts/ci/collect-agent-output.mjs"
+      - name: Scan the output for the key
+        id: scan
+        if: ${{ !cancelled() }}
+        working-directory: ${{ runner.temp }}
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: node "$TOOLS/scripts/ci/scan-secret.mjs" out
+      - name: Upload the output, only after a clean scan
+        if: ${{ !cancelled() && steps.scan.outcome == 'success' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: agent-round-${{ inputs.round }}
+          path: ${{ runner.temp }}/out
+          retention-days: 30
+
+  verify:
+    needs: agent
+    if: needs.agent.outputs.scan == 'clean'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    outputs:
+      next: ${{ steps.gate.outputs.next }}
+      accepted: ${{ steps.gate.outputs.accepted }}
+    steps:
+      # The whole history, because the gate compares with the merge base for changed lines.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check out the tools from the base commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: agent-tools
+          persist-credentials: false
+      - run: mv agent-tools "$RUNNER_TEMP/tools"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+      - name: Install the packages this change touches
+        env:
+          PACKAGES: ${{ inputs.packages }}
+        run: |
+          for name in ${PACKAGES//,/ }; do
+            npm --prefix "$name" ci
+          done
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: analysis
+          path: ${{ runner.temp }}/artifacts/analysis
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: baseline
+          path: ${{ runner.temp }}/artifacts/baseline
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: agent-round-${{ inputs.round }}
+          path: ${{ runner.temp }}/artifacts/agent-round-${{ inputs.round }}
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: inputs.round > 0
+        with:
+          name: gate-round-${{ inputs.previous }}
+          path: ${{ runner.temp }}/artifacts/gate-round-${{ inputs.previous }}
+      - name: Run the gate
+        id: gate
+        env:
+          ROUND: ${{ inputs.round }}
+          ARTIFACTS: ${{ runner.temp }}/artifacts
+          OUT: ${{ runner.temp }}/gate
+        run: node "$RUNNER_TEMP/tools/scripts/ci/run-gate.mjs"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: gate-round-${{ inputs.round }}
+          path: ${{ runner.temp }}/gate
+          retention-days: 30
