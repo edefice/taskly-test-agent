@@ -249,5 +249,6 @@ vi.setSystemTime(new Date(2026, 5, 15, 12))
 - [ ] No snapshots. The gate rejects them.
 - [ ] Interactions use `userEvent.setup()`, not direct calls to props.
 - [ ] A test can fail if the user-visible behavior breaks.
+- [ ] Each test checks what can be observed, such as what the user sees or what a hook returns, and not implementation details such as `vi.getTimerCount()` or how many times an internal function was called.
 - [ ] Nothing depends on the real clock, the time zone or the order of the tests.
 - [ ] You can describe each test in one sentence about behavior.

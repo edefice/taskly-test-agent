@@ -33,7 +33,7 @@ Before you finish a run, whatever the outcome. A run with no valid result counts
 | Decision, reasoning, test descriptions | Your result | Only you know why. |
 | Changed files | The gate | The result must match them, or it is rejected. |
 | Test results and coverage | The gate | Your opinion of your tests does not count. |
-| Skills preloaded | The `skills` field in the agent definition, read by code | Code places them in your prompt, so they are certain to reach you. |
+| Skills preloaded | Code: the `skills` field in the agent definition, and the skill for writing tests in each package with a source file | Code places them in your prompt, so they are certain to reach you. |
 | Skills invoked | The transcript | It records real tool calls. |
 | Check result (green, neutral, red) | Code | Red means existing tests pass on the base commit and fail on the pull request. Your `regressions` list cannot turn the check red. |
 | Turns, cost, model | The transcript | Measured, not stated. |

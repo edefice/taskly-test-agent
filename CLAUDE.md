@@ -82,8 +82,11 @@ When you change the agent definition or a skill, raise `AGENT_PROMPT_VERSION` in
 Add to this list after each mistake.
 
 - In zsh, `PIPESTATUS` does not exist. Use `pipestatus`, or redirect to a file and read `$?`.
+- In zsh, an unquoted variable does not split into words, so `node --test $FILES` with two paths ran nothing and looked like an empty result. Check that the control run of a mutation test reports passing tests.
 - The text coverage report hides files at 100%. Use `coverage/coverage-summary.json` for exact numbers.
 - A test with a fake runner proves little about Vitest or the Claude Code CLI. Run the real tool once before trusting a new script.
 - The `skills` field in an agent definition loads nothing when the agent is the main session (`--agent` with `-p`). `build-prompt.mjs` places those skills in the prompt.
+- A model can skip a skill it is told to load. It did in a real run, and a passing gate did not show it. What must reach the agent goes in the prompt through code: `build-prompt.mjs` picks the skills for writing tests from `source_files`.
+- An example in a skill must not come from a module that still needs tests. The agent could copy it, and the coverage would look like its own work.
 - Claude Code removes Grep and Glob when Bash is present, unless `--tools` names them. Do not name Read, Grep or Glob in `--allowedTools`, because that approves reads outside the repository.
 - The guard hook reads command text, so any Bash command containing `git` followed by a word can be blocked, even in a string. If that is a false alarm, use the Grep tool or a file for the text.

@@ -23,7 +23,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { AGENT_NAME, readAgentDefinition, TOOLS_ROOT } from '../.claude/lib/agent-definition.mjs';
-import { buildDiffPrompt, buildFilesPrompt } from '../.claude/skills/pr-change-analysis/scripts/build-prompt.mjs';
+import { buildDiffPrompt, buildFilesPrompt, skillsForSourceFiles } from '../.claude/skills/pr-change-analysis/scripts/build-prompt.mjs';
 import { analyzeChanges, classifyKind } from '../.claude/skills/pr-change-analysis/scripts/analyze-changes.mjs';
 import { readTranscript } from '../.claude/skills/pr-report/scripts/read-transcript.mjs';
 import { renderReport } from '../.claude/skills/pr-report/scripts/render-report.mjs';
@@ -200,11 +200,13 @@ export function runPipeline(options, deps = {}) {
   const definition = readAgentDefinition(TOOLS_ROOT);
   const artifacts = join(repo, ARTIFACTS_DIR);
   const steps = plan(options, repo);
+  // Preloaded means placed in a prompt. A run with no agent has no prompt.
+  const preloadedSkills = steps.needsAgent ? skillsForSourceFiles(steps.sourceFiles, TOOLS_ROOT) : [];
   const reportBase = {
     analysis: steps.analysis,
     head_sha: git(repo, ['rev-parse', 'HEAD']).trim(),
     prompt_version: definition.promptVersion,
-    preloaded_skills: definition.skills,
+    preloaded_skills: preloadedSkills,
     usage: { model: definition.model },
   };
 
@@ -215,6 +217,7 @@ export function runPipeline(options, deps = {}) {
     log(`Source files: ${steps.sourceFiles.join(', ') || 'none'}`);
     log(`Packages: ${steps.packages.join(', ') || 'none'}`);
     log(`Agent needed: ${steps.needsAgent}`);
+    log(`Skills preloaded: ${preloadedSkills.join(', ') || 'none'}`);
     log(`Feedback: ${steps.feedback === undefined ? 'none' : `${steps.feedback.length} characters`}`);
     log(`Agent command: claude ${args.filter((arg) => !arg.startsWith('{')).join(' ')}`);
     log('Dry run: the agent and the tests did not run.');
