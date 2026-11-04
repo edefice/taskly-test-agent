@@ -1,0 +1,99 @@
+{
+  "title": "Unit test agent result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["decision", "reasoning", "skills_used", "files", "tests", "existing_tests_changed", "suspected_bugs", "regressions"],
+  "properties": {
+    "decision": {
+      "type": "string",
+      "enum": ["tests_added", "tests_updated", "no_tests_needed", "failed"],
+      "description": "tests_added: new tests. tests_updated: only existing test files changed. no_tests_needed: a deliberate choice, explained in reasoning. failed: you could not finish."
+    },
+    "reasoning": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1000,
+      "description": "Why you decided this, in one to three plain sentences."
+    },
+    "skills_used": {
+      "type": "array",
+      "maxItems": 5,
+      "items": {
+        "type": "string",
+        "enum": ["pr-change-analysis", "backend-unit-tests", "frontend-unit-tests", "test-verification", "pr-report"]
+      }
+    },
+    "files": {
+      "type": "array",
+      "maxItems": 100,
+      "description": "Every file you created or changed.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "action"],
+        "properties": {
+          "path": { "type": "string", "minLength": 1, "maxLength": 300 },
+          "action": { "type": "string", "enum": ["created", "modified"] }
+        }
+      }
+    },
+    "tests": {
+      "type": "array",
+      "maxItems": 200,
+      "description": "One entry for every test you added, with its exact title as name. Do not group tests. A test you cannot describe in one sentence about behavior should not exist.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["file", "name", "behavior"],
+        "properties": {
+          "file": { "type": "string", "minLength": 1, "maxLength": 300 },
+          "name": { "type": "string", "minLength": 1, "maxLength": 300 },
+          "behavior": { "type": "string", "minLength": 1, "maxLength": 300 }
+        }
+      }
+    },
+    "existing_tests_changed": {
+      "type": "array",
+      "maxItems": 100,
+      "description": "Existing tests you changed, each with the reason the pull request requires it.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "justification"],
+        "properties": {
+          "path": { "type": "string", "minLength": 1, "maxLength": 300 },
+          "justification": { "type": "string", "minLength": 1, "maxLength": 300 }
+        }
+      }
+    },
+    "suspected_bugs": {
+      "type": "array",
+      "maxItems": 20,
+      "description": "Application behavior that looks wrong. Report it, and do not write it into a test as correct.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["file", "expected", "actual"],
+        "properties": {
+          "file": { "type": "string", "minLength": 1, "maxLength": 300 },
+          "expected": { "type": "string", "minLength": 1, "maxLength": 300 },
+          "actual": { "type": "string", "minLength": 1, "maxLength": 300 }
+        }
+      }
+    },
+    "regressions": {
+      "type": "array",
+      "maxItems": 20,
+      "description": "Existing tests that fail because of the pull request. You do not fix these. The check result comes from code, not from this list.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["test", "explanation"],
+        "properties": {
+          "test": { "type": "string", "minLength": 1, "maxLength": 300 },
+          "explanation": { "type": "string", "minLength": 1, "maxLength": 300 }
+        }
+      }
+    }
+  }
+}
