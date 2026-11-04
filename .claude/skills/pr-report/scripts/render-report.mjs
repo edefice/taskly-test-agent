@@ -176,7 +176,7 @@ function mutationLines(mutation) {
   const packages = Object.entries(mutation.packages ?? {}).map(([name, entry]) => {
     if (MUTATION_NOT_RUN[entry.status]) return `- ${safeCode(name)} ${MUTATION_NOT_RUN[entry.status]}.`;
     const missed = entry.survived + entry.no_coverage;
-    return `- ${safeCode(name)}: ${entry.caught} of ${entry.total} changes to the changed lines made a test fail, ${missed} did not.`;
+    return `- ${safeCode(name)}: ${entry.caught} of ${entry.total} changes to the code made a test fail, ${missed} did not.`;
   });
   const skipped = mutation.skipped_paths ?? [];
   if (skipped.length > 0) packages.push(`- Not checked, because of unusual file names: ${skipped.slice(0, 5).map((path) => safeCode(path)).join(', ')}`);

@@ -656,7 +656,7 @@ describe('renderReport: mutation check', () => {
   });
 
   it('gives the counts per package', () => {
-    assert.match(render(completed([mutant()])), /`backend`: 9 of 10 changes to the changed lines made a test fail, 1 did not\./);
+    assert.match(render(completed([mutant()])), /`backend`: 9 of 10 changes to the code made a test fail, 1 did not\./);
   });
 
   it('counts code no test runs as missed', () => {
