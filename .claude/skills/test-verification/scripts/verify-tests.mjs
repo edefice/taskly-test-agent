@@ -18,7 +18,7 @@ import { classifyTestPath } from '../../../lib/test-paths.mjs';
 import { analyzeChanges } from '../../pr-change-analysis/scripts/analyze-changes.mjs';
 import { changedLinesFromDiff, clearCoverage, compareCoverage, readCoverage, serializableCoverage } from './lib/coverage.mjs';
 import { sanitizeLog } from './lib/sanitize-log.mjs';
-import { checkTestFile } from './lib/test-rules.mjs';
+import { checkTestFile, compareTestFile } from './lib/test-rules.mjs';
 import { compareRuns, summarizeReport } from './lib/vitest-results.mjs';
 
 export const PACKAGES = ['backend', 'frontend'];
@@ -155,6 +155,16 @@ function checkRules(exec, repo, changes) {
   return { violations, existingTestsChanged, newTests };
 }
 
+/** Facts about existing test files, from the code alone, after any formatting. The report trusts these over the agent. */
+function modifiedTestFiles(exec, repo, changes) {
+  const modified = [];
+  for (const { path } of changes) {
+    const before = fileAtHead(exec, repo, path);
+    if (before !== null) modified.push({ path, ...compareTestFile({ before, after: readFileSync(join(repo, path), 'utf8') }) });
+  }
+  return modified;
+}
+
 export function changedLinesFor(exec, repo, mergeBase, sourceFiles) {
   const lines = new Map();
   if (!mergeBase) return lines;
@@ -289,6 +299,7 @@ export function runVerify({ repo, mergeBase, sourceFiles = [], baseline, exec = 
     changed_files: changes.map(({ path }) => ({ path, class: classifyTestPath(path) })),
     shared_test_support: changes.map(({ path }) => path).filter((path) => classifyTestPath(path) === 'shared-test-support'),
     existing_tests_changed: [],
+    modified_test_files: [],
     new_tests: [],
     packages: {},
     failures,
@@ -363,6 +374,7 @@ export function runVerify({ repo, mergeBase, sourceFiles = [], baseline, exec = 
       changedLines,
     });
   }
+  report.modified_test_files = modifiedTestFiles(exec, repo, changes);
   return finish();
 }
 

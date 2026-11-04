@@ -11,6 +11,7 @@ import { readFileSync, realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { clean } from '../../test-verification/scripts/lib/sanitize-log.mjs';
+import { claimMismatches } from './claim-check.mjs';
 
 export const REPORT_MARKER = '<!-- unit-test-agent-report -->';
 export const SOURCE_NOTE = 'Test descriptions and possible bugs are reported by the agent and not verified. Test results, coverage and the check result come from the gate.';
@@ -166,6 +167,16 @@ function flatCoverageFiles(packages) {
   });
 }
 
+/** Comes from the diff, so it holds whatever the agent says. The agent's reason is shown as its own words. */
+function modifiedFileLines(verification, result) {
+  const reasons = new Map((result?.existing_tests_changed ?? []).map(({ path, justification }) => [path, justification]));
+  return limited(verification?.modified_test_files ?? [], ({ path, added_lines: added, removed_lines: removed, changed_tests: changedTests }) => {
+    const tests = changedTests.length > 0 ? ` Existing tests changed: ${changedTests.slice(0, 10).map((title) => safeCode(title)).join(', ')}${changedTests.length > 10 ? `, and ${changedTests.length - 10} more` : ''}.` : ' No existing test changed.';
+    const reason = reasons.has(path) ? ` The agent says: ${safeText(reasons.get(path), 300)}` : '';
+    return `- ${safeCode(path)}: +${added} and -${removed} lines.${tests}${reason}`;
+  });
+}
+
 function gateFailures(failures) {
   return limited(failures, (failure) => {
     const where = failure.package ? ` in ${safeCode(failure.package)}` : '';
@@ -261,10 +272,23 @@ export function renderReport(input) {
       limited(result?.suspected_bugs ?? [], ({ file, expected, actual }) => `- ${safeCode(file)}: expected ${safeText(expected, 300)}, actual ${safeText(actual, 300)}`),
     ),
   );
+  lines.push(...section('Existing test files modified', modifiedFileLines(verification, result)));
+  lines.push(
+    ...section(
+      'The agent and the diff disagree',
+      limited(claimMismatches(result, verification), ({ path, kind, tests }) => {
+        const names = tests.slice(0, 10).map((title) => safeCode(title)).join(', ');
+        const claim = kind === 'claims_unchanged' ? 'The agent says existing tests are unchanged' : 'The agent does not mention this change';
+        return `- ${safeCode(path)}: ${claim}, but the diff shows changes to ${names}. This is a warning and does not block the pull request.`;
+      }),
+    ),
+  );
+  // A run with no gate report has no diff to show, so the agent's own words are all there is.
+  const known = new Set((verification?.modified_test_files ?? []).map(({ path }) => path));
   lines.push(
     ...section(
       'Existing tests changed',
-      limited(result?.existing_tests_changed ?? [], ({ path, justification }) => `- ${safeCode(path)}: ${safeText(justification, 300)}`),
+      limited((result?.existing_tests_changed ?? []).filter(({ path }) => !known.has(path)), ({ path, justification }) => `- ${safeCode(path)}: ${safeText(justification, 300)}`),
     ),
   );
   lines.push(
