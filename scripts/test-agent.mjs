@@ -15,8 +15,8 @@
 // --no-mutation skips the mutation check that follows an accepted run.
 // --repair-rounds gives the agent more attempts, at most 2, when the gate rejects its
 // tests. The default is 0, because each round costs money.
-// --mutation-repair lets one of those rounds answer surviving mutants. It is off by default:
-// no real run has shown it to work, so a survivor is only a warning in the report.
+// --mutation-repair lets one of those rounds answer surviving mutants. Without it, a survivor
+// is only a warning in the report.
 //
 // Bash runs tests written by the agent on this machine, so use this on your own code only.
 //

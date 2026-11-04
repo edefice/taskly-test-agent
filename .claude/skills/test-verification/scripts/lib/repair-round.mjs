@@ -7,8 +7,8 @@ import { sanitizeLog } from './sanitize-log.mjs';
 export const MAX_REPAIR_ROUNDS = 2;
 // A mutant that cannot change behavior can never be caught, so another round would not help.
 export const MAX_MUTATION_ROUNDS = 1;
-// Off unless asked for. A repair round for mutants has not been shown to work on a real run,
-// so by default a survivor is only a warning in the report.
+// Off unless asked for, because a round costs money. The workflow asks for it. It is checked on
+// one real run only, where 3 surviving mutants of behavior reached the agent and were caught.
 export const DEFAULT_MUTATION_ROUNDS = 0;
 
 const MAX_TESTS_PER_FAILURE = 5;
