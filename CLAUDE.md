@@ -35,12 +35,14 @@ The versions are exact, and a test keeps this table equal to `package.json`.
 | backend | `zod` | 4.6.5 |
 | backend | `vitest` | 4.1.11 |
 | backend | `supertest` | 7.3.1 |
+| backend | `@stryker-mutator/core` | 10.1.1 |
 | frontend | `react` | 19.3.0 |
 | frontend | `@tanstack/react-query` | 5.104.1 |
 | frontend | `vitest` | 4.1.11 |
 | frontend | `@testing-library/react` | 16.3.3 |
 | frontend | `@testing-library/user-event` | 14.6.7 |
 | frontend | `jsdom` | 26.1.0 |
+| frontend | `@stryker-mutator/core` | 10.1.1 |
 
 ## Test conventions
 

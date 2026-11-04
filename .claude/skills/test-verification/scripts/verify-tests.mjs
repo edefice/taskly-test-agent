@@ -36,13 +36,13 @@ export function childEnv(env = process.env) {
   return { ...clean, CI: 'true', TZ: 'UTC' };
 }
 
-export function defaultExec(command, args, { cwd }) {
+export function defaultExec(command, args, { cwd, timeoutMs = COMMAND_TIMEOUT_MS }) {
   const result = spawnSync(command, args, {
     cwd,
     env: childEnv(),
     encoding: 'utf8',
     maxBuffer: 256 * 1024 * 1024,
-    timeout: COMMAND_TIMEOUT_MS,
+    timeout: timeoutMs,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   return {
@@ -153,7 +153,7 @@ function checkRules(exec, repo, changes) {
   return { violations, existingTestsChanged, newTests };
 }
 
-function changedLinesFor(exec, repo, mergeBase, sourceFiles) {
+export function changedLinesFor(exec, repo, mergeBase, sourceFiles) {
   const lines = new Map();
   if (!mergeBase) return lines;
   for (const path of sourceFiles) {

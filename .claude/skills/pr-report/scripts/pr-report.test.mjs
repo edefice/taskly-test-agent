@@ -645,6 +645,82 @@ describe('renderReport', () => {
   });
 });
 
+describe('renderReport: mutation check', () => {
+  const base = { outcome: 'tests_added', result: validResult(), head_sha: 'abc', usage: {} };
+  const mutant = (overrides = {}) => ({ path: 'backend/src/a.ts', line: 7, status: 'Survived', mutator: 'ConditionalExpression', original: 'a > 0', replacement: 'true', data_only: false, ...overrides });
+  const completed = (mutants, entry = {}) => ({ status: 'completed', reason: null, skipped_paths: [], packages: { backend: { status: 'completed', total: 10, caught: 10 - mutants.length, survived: mutants.length, no_coverage: 0, errors: 0, ...entry } }, mutants });
+  const render = (mutation, extra = {}) => renderReport({ ...base, mutation, ...extra }).markdown;
+
+  it('has no section without a result', () => {
+    assert.doesNotMatch(render(undefined), /Mutation check/);
+  });
+
+  it('gives the counts per package', () => {
+    assert.match(render(completed([mutant()])), /`backend`: 9 of 10 changes to the code made a test fail, 1 did not\./);
+  });
+
+  it('counts code no test runs as missed', () => {
+    assert.match(render(completed([mutant({ status: 'NoCoverage' })], { survived: 0, no_coverage: 1 })), /9 of 10 .* 1 did not/);
+  });
+
+  it('lists what no test noticed, with the place and the change, as a warning', () => {
+    const markdown = render(completed([mutant()]));
+    assert.match(markdown, /`backend\/src\/a\.ts:7`: `a > 0` became `true`/);
+    assert.match(markdown, /does not block the pull request/);
+  });
+
+  it('has no warning when every change was caught', () => {
+    assert.doesNotMatch(render(completed([])), /does not block/);
+  });
+
+  it('never changes the check result', () => {
+    assert.equal(renderReport({ ...base, mutation: completed([mutant()]) }).conclusion, 'success');
+    assert.equal(renderReport({ ...base, mutation: { status: 'incomplete', packages: { backend: { status: 'failed' } }, mutants: [] } }).conclusion, 'success');
+  });
+
+  it('counts data mutants and does not list them', () => {
+    const markdown = render(completed([mutant({ data_only: true, original: 'a label' })]));
+    assert.doesNotMatch(markdown, /a label/);
+    assert.match(markdown, /1 more changed only text or data/);
+  });
+
+  it('caps the list', () => {
+    const markdown = render(completed(Array.from({ length: 13 }, (_, line) => mutant({ line }))));
+    assert.equal((markdown.match(/ became /g) ?? []).length, 10);
+    assert.match(markdown, /and 3 more, see the run artifact/);
+  });
+
+  it('says when it was skipped and why', () => {
+    assert.match(render({ status: 'skipped', reason: 'The change has 500 changed source lines.', packages: {}, mutants: [] }), /Not run\. The change has 500/);
+  });
+
+  it('says when a package did not finish, without a log from the branch', () => {
+    const markdown = render({ status: 'incomplete', packages: { backend: { status: 'timed_out' }, frontend: { status: 'failed', log: 'secret log text' } }, mutants: [] });
+    assert.match(markdown, /`backend` hit the time limit/);
+    assert.match(markdown, /`frontend` could not run/);
+    assert.doesNotMatch(markdown, /secret log text/);
+  });
+
+  it('names files it left out', () => {
+    assert.match(render({ ...completed([]), skipped_paths: ['backend/src/a b.ts'] }), /unusual file names: `backend\/src\/a b\.ts`/);
+  });
+
+  it('makes code from the branch safe', () => {
+    const markdown = render(completed([mutant({ original: '`<img src=x> @someone', replacement: '<!-- -->|' })]));
+    assert.doesNotMatch(markdown, /<!-- -->/);
+    assert.match(markdown, /'<img src=x> @someone/);
+    assert.ok(markdown.split('<!-- unit-test-agent-report -->').length === 2);
+  });
+
+  it('shows repair rounds and why earlier tests were kept', () => {
+    const markdown = render(undefined, { repair_rounds: 1, repair_note: 'The gate rejected a repair round, so the tests accepted earlier were kept.' });
+    assert.match(markdown, /1 repair round\b/);
+    assert.match(markdown, /tests accepted earlier were kept/);
+    assert.match(render(undefined, { repair_rounds: 2 }), /2 repair rounds/);
+    assert.doesNotMatch(render(undefined, { repair_rounds: 0 }), /repair round/);
+  });
+});
+
 describe('render-report command line', () => {
   const path = () => {
     const file = join(directory, 'input.json');

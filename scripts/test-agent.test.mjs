@@ -44,6 +44,29 @@ describe('parseOptions', () => {
     assert.equal(parseOptions(['--base', 'main']).feedback, undefined);
   });
 
+  it('has the mutation check on and no repair rounds by default, because rounds cost money', () => {
+    const options = parseOptions(['--base', 'main']);
+    assert.equal(options.noMutation, false);
+    assert.equal(options.repairRounds, 0);
+  });
+
+  it('reads the mutation and repair options', () => {
+    const options = parseOptions(['--base', 'main', '--no-mutation', '--repair-rounds', '2', '--mutation-repair']);
+    assert.equal(options.noMutation, true);
+    assert.equal(options.repairRounds, 2);
+    assert.equal(options.mutationRepair, true);
+  });
+
+  it('leaves repair for mutants off by default', () => {
+    assert.equal(parseOptions(['--base', 'main']).mutationRepair, false);
+  });
+
+  for (const value of ['3', '-1', '1.5', 'x']) {
+    it(`rejects ${value} repair rounds`, () => {
+      assert.throws(() => parseOptions(['--base', 'main', '--repair-rounds', value]), /--repair-rounds/);
+    });
+  }
+
   for (const [name, args] of [
     ['neither mode', []],
     ['both modes', ['--base', 'main', '--files', 'a.ts']],
@@ -213,7 +236,7 @@ describe('runPipeline', () => {
   };
 
   const fakes = (overrides = {}) => {
-    const calls = { baseline: [], verify: [], claude: [], logs: [] };
+    const calls = { baseline: [], verify: [], mutate: [], claude: [], logs: [] };
     return {
       calls,
       deps: {
@@ -226,8 +249,13 @@ describe('runPipeline', () => {
           calls.verify.push(options);
           return { schema_version: 1, status: 'passed', changed_files: [{ path: TEST_FILE, class: 'test' }], existing_tests_changed: [], shared_test_support: [], packages: {}, failures: [] };
         },
+        mutate: (options) => {
+          calls.mutate.push(options);
+          return { schema_version: 1, status: 'completed', reason: null, skipped_paths: [], packages: {}, mutants: [] };
+        },
         claude: ({ args, transcriptPath }) => {
           calls.claude.push(args);
+          write(TEST_FILE, `// attempt ${calls.claude.length}\n`);
           writeFileSync(
             transcriptPath,
             [
@@ -504,6 +532,7 @@ describe('runPipeline', () => {
     const result = runPipeline(options(), deps);
     assert.equal(result.outcome, 'agent_failed');
     assert.match(artifact('report.md'), /could not start/);
+    assert.doesNotMatch(artifact('report.md'), /turns|\$0\.0000/);
   });
 
   it('reports a rejection by the gate and exits with 1', () => {
@@ -547,6 +576,177 @@ describe('runPipeline', () => {
     const { deps } = fakes();
     runPipeline(options(), deps);
     assert.ok(!existsSync(join(repo, ARTIFACTS_DIR, 'old.json')));
+  });
+
+  describe('mutation check and repair rounds', () => {
+    const mutant = (overrides = {}) => ({ path: 'backend/src/a.ts', line: 1, status: 'Survived', mutator: 'ConditionalExpression', original: 'a > 0', replacement: 'true', data_only: false, ...overrides });
+    const mutationWith = (...mutants) => ({ schema_version: 1, status: 'completed', reason: null, skipped_paths: [], packages: { backend: { status: 'completed', total: 2, caught: 2 - mutants.length, survived: mutants.length, no_coverage: 0, errors: 0 } }, mutants });
+    const accepted = { schema_version: 1, status: 'passed', changed_files: [{ path: TEST_FILE, class: 'test' }], existing_tests_changed: [], shared_test_support: [], packages: {}, failures: [] };
+    const rejected = { ...accepted, status: 'failed', failures: [{ check: 'typecheck', package: 'backend', message: 'The package does not typecheck.', log: 'TS2345 in a.test.ts' }] };
+    /** Each attempt gets the next answer, and the last one repeats. */
+    const inOrder = (...answers) => {
+      let index = 0;
+      return () => structuredClone(answers[Math.min(index++, answers.length - 1)]);
+    };
+
+    it('runs after an accepted run, on the same files and merge base as the gate', () => {
+      changeSource();
+      const { deps, calls } = fakes();
+      runPipeline(options(), deps);
+      assert.deepEqual(calls.mutate[0].sourceFiles, ['backend/src/a.ts']);
+      assert.equal(calls.mutate[0].mergeBase, calls.verify[0].mergeBase);
+      assert.equal(JSON.parse(artifact('mutation.json')).status, 'completed');
+    });
+
+    it('does not run after a rejection, because a red test proves nothing about mutants', () => {
+      changeSource();
+      const { deps, calls } = fakes({ verify: inOrder(rejected) });
+      runPipeline(options(), deps);
+      assert.deepEqual(calls.mutate, []);
+    });
+
+    it('does not run with noMutation', () => {
+      changeSource();
+      const { deps, calls } = fakes();
+      assert.equal(runPipeline(options({ noMutation: true }), deps).outcome, 'tests_added');
+      assert.deepEqual(calls.mutate, []);
+    });
+
+    it('survivors alone never reject tests or block the check', () => {
+      changeSource();
+      const { deps, calls } = fakes({ mutate: () => mutationWith(mutant()) });
+      const result = runPipeline(options(), deps);
+      assert.equal(result.outcome, 'tests_added');
+      assert.equal(result.conclusion, 'success');
+      assert.equal(result.exitCode, 0);
+      assert.equal(calls.claude.length, 1);
+      assert.match(artifact('report.md'), /`a > 0` became `true`/);
+    });
+
+    it('by default leaves survivors as a warning, even with repair rounds allowed', () => {
+      changeSource();
+      const { deps, calls } = fakes({ mutate: () => mutationWith(mutant()) });
+      const result = runPipeline(options({ repairRounds: 2 }), deps);
+      assert.equal(calls.claude.length, 1);
+      assert.equal(result.outcome, 'tests_added');
+      assert.equal(result.exitCode, 0);
+      assert.match(artifact('report.md'), /`a > 0` became `true`/);
+      assert.doesNotMatch(artifact('report.md'), /repair round/);
+    });
+
+    it('with mutationRepair, gives survivors to the agent in a data tag, and then stops', () => {
+      changeSource();
+      const { deps, calls } = fakes({ mutate: inOrder(mutationWith(mutant()), mutationWith(mutant({ line: 2 }))) });
+      const result = runPipeline(options({ repairRounds: 2, mutationRepair: true }), deps);
+      assert.equal(calls.claude.length, 2);
+      const prompt = calls.claude[1][1];
+      assert.match(prompt, /<untrusted-feedback-[0-9a-f]+>[\s\S]*backend\/src\/a\.ts:1: `a > 0` became `true`[\s\S]*<\/untrusted-feedback-/);
+      assert.match(prompt, /are in the working tree/);
+      assert.equal(result.outcome, 'tests_added');
+      assert.match(artifact('report.md'), /1 repair round\b/);
+      assert.match(artifact('report.md'), /a\.ts:2/);
+    });
+
+    it('checks the repair round again with the gate and the mutation check', () => {
+      changeSource();
+      const { deps, calls } = fakes({ mutate: inOrder(mutationWith(mutant()), mutationWith()) });
+      runPipeline(options({ repairRounds: 2, mutationRepair: true }), deps);
+      assert.equal(calls.verify.length, 2);
+      assert.ok(existsSync(join(repo, ARTIFACTS_DIR, 'mutation.round-1.json')));
+      assert.equal(JSON.parse(artifact('report-input.json')).mutation.mutants.length, 0);
+    });
+
+    it('keeps the artifacts of each attempt apart', () => {
+      changeSource();
+      const { deps } = fakes({ mutate: inOrder(mutationWith(mutant()), mutationWith()) });
+      runPipeline(options({ repairRounds: 1, mutationRepair: true }), deps);
+      for (const name of ['prompt.round-1.txt', 'feedback.round-1.txt', 'transcript.round-1.jsonl', 'result.round-1.json', 'verify.round-1.json', 'mutation.round-1.json']) {
+        assert.ok(existsSync(join(repo, ARTIFACTS_DIR, name)), name);
+      }
+      assert.equal(JSON.parse(artifact('mutation.json')).mutants.length, 1);
+    });
+
+    it('adds up the cost and turns of all attempts', () => {
+      changeSource();
+      const { deps } = fakes({ mutate: inOrder(mutationWith(mutant()), mutationWith()) });
+      runPipeline(options({ repairRounds: 1, mutationRepair: true }), deps);
+      assert.match(artifact('report.md'), /14 turns/);
+      assert.match(artifact('report.md'), /\$0\.5000/);
+      assert.match(artifact('report.md'), /2 blocked tool calls/);
+    });
+
+    it('gives a rejection to the agent with the log, and accepts a good repair', () => {
+      changeSource();
+      const { deps, calls } = fakes({ verify: inOrder(rejected, accepted) });
+      const result = runPipeline(options({ repairRounds: 1 }), deps);
+      assert.equal(result.outcome, 'tests_added');
+      assert.equal(result.exitCode, 0);
+      assert.match(calls.claude[1][1], /<untrusted-feedback-[0-9a-f]+>[\s\S]*TS2345 in a\.test\.ts/);
+    });
+
+    it('stops after the allowed rounds and reports the rejection', () => {
+      changeSource();
+      const { deps, calls } = fakes({ verify: inOrder(rejected) });
+      const result = runPipeline(options({ repairRounds: 2 }), deps);
+      assert.equal(calls.claude.length, 3);
+      assert.equal(result.outcome, 'tests_rejected');
+      assert.equal(result.exitCode, 1);
+    });
+
+    describe('when a repair round makes accepted tests worse', () => {
+      const EXISTING = 'backend/tests/old.test.ts';
+      const prepare = () => {
+        write(EXISTING, '// original\n');
+        changeSource();
+      };
+      const agentThatBreaksThings = (calls, afterRepair) => ({ args, transcriptPath }) => {
+        calls.push(args);
+        if (calls.length === 1) {
+          write(TEST_FILE, '// accepted\n');
+        } else {
+          write(TEST_FILE, '// worse\n');
+          write(EXISTING, '// damaged\n');
+          write('backend/tests/extra.test.ts', '// extra\n');
+        }
+        const final = calls.length === 1 ? { type: 'result', subtype: 'success', num_turns: 1, total_cost_usd: 0.1, structured_output: validResult() } : afterRepair;
+        writeFileSync(transcriptPath, JSON.stringify(final));
+        return { status: 0, timedOut: false, startError: null };
+      };
+      const expectAcceptedTree = () => {
+        assert.equal(readFileSync(join(repo, TEST_FILE), 'utf8'), '// accepted\n');
+        assert.equal(readFileSync(join(repo, EXISTING), 'utf8'), '// original\n');
+        assert.equal(existsSync(join(repo, 'backend/tests/extra.test.ts')), false);
+      };
+
+      it('keeps the accepted tests after the gate rejects the repair', () => {
+        prepare();
+        const claudeCalls = [];
+        const { deps } = fakes({
+          claude: agentThatBreaksThings(claudeCalls, { type: 'result', subtype: 'success', num_turns: 1, total_cost_usd: 0.1, structured_output: validResult() }),
+          verify: inOrder(accepted, rejected),
+          mutate: inOrder(mutationWith(mutant())),
+        });
+        const result = runPipeline(options({ repairRounds: 1, mutationRepair: true }), deps);
+        expectAcceptedTree();
+        assert.equal(result.outcome, 'tests_added');
+        assert.equal(result.exitCode, 0);
+        assert.match(artifact('report.md'), /tests accepted earlier were kept/);
+        assert.match(artifact('report.md'), /`a > 0` became `true`/);
+      });
+
+      it('keeps the accepted tests after the agent fails in the repair', () => {
+        prepare();
+        const claudeCalls = [];
+        const { deps } = fakes({
+          claude: agentThatBreaksThings(claudeCalls, { type: 'result', subtype: 'error_max_turns', num_turns: 1 }),
+          mutate: inOrder(mutationWith(mutant())),
+        });
+        const result = runPipeline(options({ repairRounds: 1, mutationRepair: true }), deps);
+        expectAcceptedTree();
+        assert.equal(result.outcome, 'tests_added');
+        assert.match(artifact('report.md'), /turn limit/);
+      });
+    });
   });
 
   it('exits with 2 and a readable message from the command line', () => {
