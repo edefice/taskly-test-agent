@@ -3,16 +3,19 @@
 
 const ANSI_SEQUENCE = /\u001b(?:\][^\u0007\u001b]*(?:\u0007|\u001b\\)|\[[0-?]*[ -/]*[@-~]|[@-Z\\^_])/g;
 const CONTROL_CHARACTER = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g;
+// Zero-width and direction characters can make text read differently than it is.
+const INVISIBLE_CHARACTER = /[­​-‏‪-‮⁠-⁩﻿]/g;
 const CREDENTIAL = /\b(?:sk-ant-[\w-]+|gh[pousr]_\w+|github_pat_\w+)/g;
 
 export const DEFAULT_LOG_LIMIT = 4000;
 export const DEFAULT_MESSAGE_LIMIT = 1500;
 
-function clean(text) {
+export function clean(text) {
   return String(text ?? '')
     .replace(ANSI_SEQUENCE, '')
     .replace(/\r\n?/g, '\n')
     .replace(CONTROL_CHARACTER, '')
+    .replace(INVISIBLE_CHARACTER, '')
     .replace(CREDENTIAL, '[REDACTED]');
 }
 

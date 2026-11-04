@@ -22,6 +22,10 @@ describe('sanitizeLog', () => {
     assert.equal(sanitizeLog('a\u009b31mb'), 'a31mb');
   });
 
+  it('removes zero-width and text direction characters', () => {
+    assert.equal(sanitizeLog('a​b‮c⁦d﻿e­f'), 'abcdef');
+  });
+
   it('normalizes carriage returns, so text cannot overwrite a line', () => {
     assert.equal(sanitizeLog('visible\rhidden\r\nnext'), 'visible\nhidden\nnext');
   });
