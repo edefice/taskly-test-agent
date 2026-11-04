@@ -532,7 +532,7 @@ describe('runPipeline', () => {
     const result = runPipeline(options(), deps);
     assert.equal(result.outcome, 'agent_failed');
     assert.match(artifact('report.md'), /could not start/);
-    assert.doesNotMatch(artifact('report.md'), /turns|\$0\.0000/);
+    assert.doesNotMatch(artifact('report.md'), /turns|\$0\.0000|Model /);
   });
 
   it('reports a rejection by the gate and exits with 1', () => {

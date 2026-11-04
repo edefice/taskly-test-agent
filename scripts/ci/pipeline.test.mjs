@@ -310,9 +310,25 @@ describe('with real git', () => {
       assert.equal(record.next, '');
     });
 
-    it('reports a run with no transcript as failed', () => {
-      const record = runGateRound({ ...options({ transcriptText: '', agent: { action_outcome: 'failure', paths: [], outside: [] } }), deps: deps() });
+    it('says that the agent most likely never started when there is no transcript, and not that the API failed', () => {
+      let ran = false;
+      const record = runGateRound({ ...options({ transcriptText: '', agent: { action_outcome: 'failure', paths: [], outside: [] } }), deps: deps({ verify: () => { ran = true; return passed(); } }) });
       assert.equal(record.outcome, 'agent_failed');
+      assert.match(record.failure_reason, /no transcript, so it most likely never started/);
+      assert.doesNotMatch(record.failure_reason, /API/);
+      assert.equal(ran, false);
+      assert.equal(record.next, '');
+    });
+
+    it('says when preparing the attempt failed, so the agent step was skipped', () => {
+      const record = runGateRound({ ...options({ transcriptText: '  \n', agent: { action_outcome: 'skipped', paths: [], outside: [] } }), deps: deps() });
+      assert.match(record.failure_reason, /preparing it failed/);
+    });
+
+    it('still reports a cut transcript as a run with no final result', () => {
+      const record = runGateRound({ ...options({ transcriptText: JSON.stringify([{ type: 'system', subtype: 'init', model: 'm' }]), agent: { action_outcome: 'failure', paths: [], outside: [] } }), deps: deps() });
+      assert.match(record.failure_reason, /without a final result/);
+      assert.equal(record.usage.model, 'm');
     });
 
     it('refuses an attempt that changed a path outside the allowlist, and runs nothing', () => {
@@ -509,7 +525,7 @@ describe('with real git', () => {
 
 describe('buildReportInput', () => {
   const round = (record) => ({ record: { usage: { model: 'm', turns: 2, cost_usd: 0.1, blocked_calls: 0 }, invoked_skills: [], result: validResult(), verification: { failures: [], packages: {}, changed_files: [], shared_test_support: [] }, accepted: false, ...record } });
-  const state = (overrides = {}) => ({ guard: { run: true, report: true }, analysis: { decision: {} }, rounds: [], headSha: 'abc', runUrl: 'https://github.com/o/r/actions/runs/1', promptVersion: '4', model: 'configured', preloadedSkills: ['a'], ...overrides });
+  const state = (overrides = {}) => ({ guard: { run: true, report: true }, analysis: { decision: {} }, rounds: [], headSha: 'abc', runUrl: 'https://github.com/o/r/actions/runs/1', promptVersion: '4', preloadedSkills: ['a'], ...overrides });
   const added = round({ outcome: 'tests_added', accepted: true });
   const rejected = round({ outcome: 'tests_rejected' });
 
@@ -558,6 +574,15 @@ describe('buildReportInput', () => {
     assert.equal(input.outcome, 'agent_failed');
     assert.match(input.failure_reason, /left no result/);
     assert.equal(input.usage.turns, undefined);
+  });
+
+  it('names a model only when a transcript shows one', () => {
+    const noModel = round({ outcome: 'agent_failed', failure_reason: 'x', usage: { model: null, turns: null, cost_usd: null, blocked_calls: 0 } });
+    assert.equal(buildReportInput(state({ rounds: [noModel] })).usage.model, undefined);
+    assert.doesNotMatch(renderReport(buildReportInput(state({ rounds: [noModel] }))).markdown, /Model /);
+    assert.doesNotMatch(renderReport(buildReportInput(state())).markdown, /Model /);
+    assert.doesNotMatch(renderReport(buildReportInput(state({ guard: { run: false, report: true, outcome: 'fork' } }))).markdown, /Model /);
+    assert.match(renderReport(buildReportInput(state({ rounds: [added] }))).markdown, /Model `m`/);
   });
 
   it('reports a failed first job', () => {

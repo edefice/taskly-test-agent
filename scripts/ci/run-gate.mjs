@@ -21,6 +21,11 @@ import { decideOutcome, interpretRun } from '../test-agent.mjs';
 import { readJson, requireEnv, setOutputs, writeJson } from './lib/github.mjs';
 import { applyPatch, collectPatch } from './lib/patch.mjs';
 
+/** With no transcript, nothing shows that a model ran, so the report must not suggest an API failure. */
+const noTranscriptReason = (actionOutcome) => (actionOutcome === 'skipped'
+  ? 'The attempt did not start, because preparing it failed. The log of the run has the cause.'
+  : 'The agent left no transcript, so it most likely never started. The log of the run has the cause.');
+
 const refusedVerification = (message, paths) => ({
   schema_version: 1,
   status: 'failed',
@@ -61,6 +66,7 @@ export function runGateRound({ repo, round, analysis, baseline, agent, transcrip
     next: '',
     feedback: null,
   };
+  if (transcriptText.trim() === '') return { ...record, result: null, outcome: 'agent_failed', failure_reason: noTranscriptReason(agent.action_outcome) };
   const run = { status: agent.action_outcome === 'success' ? 0 : 1, timedOut: false, startError: null };
   const { failureReason, result } = interpretRun({ run, transcript });
   record.result = result;
