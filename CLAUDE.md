@@ -79,6 +79,9 @@ These are reported and not fixed yet. Do not add tests that expect the current b
 | What the agent may change | `.claude/lib/test-paths.mjs` |
 | The hook that enforces it | `.claude/hooks/guard-tools.mjs` |
 | The local runner | `scripts/test-agent.mjs` |
+| The workflow | `.github/workflows/test-agent.yml` and `test-agent-round.yml` |
+| The steps of the workflow | `scripts/ci/` |
+| What a test keeps true in the workflow | `scripts/ci/workflow-rules.mjs` |
 
 When you change the agent definition or a skill, raise `AGENT_PROMPT_VERSION` in the agent definition.
 
@@ -100,4 +103,7 @@ Add to this list after each mistake.
 - Node 22 prints a TAP summary by default (`# tests 874`) and Node 24 prints spec (`ℹ tests 874`). Use the exit code in scripts, not the text.
 - Stryker reports 35 of 35 and a test can still be weak: it does not remove props, calls or fields, so a mock that ignores a prop hides a gap. On those tests, 4 of 6 hand-made mutations survived. Do not present a mutation score as proof of test quality.
 - A check of the agent's words per file raises a false alarm on a true "I added tests, the existing ones are unchanged". Compare each existing test by itself.
+- macOS has no `timeout` command, and a missing command in a chain can look like a finished step. Set the limit in the tool that runs the command.
+- `spawnSync` blocks the whole process, so a server in the same process cannot answer the child. Use `spawn` when the child talks to it.
+- A workflow can pass every test and still fail on the first real run, for example a shallow checkout where a script needs the merge base. Read the YAML against what each script needs, and rehearse the steps with real tools before a paid run.
 - The guard hook reads command text, so any Bash command containing `git` followed by a word can be blocked, even in a string. If that is a false alarm, use the Grep tool or a file for the text.
