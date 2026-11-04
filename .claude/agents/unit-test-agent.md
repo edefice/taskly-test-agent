@@ -5,9 +5,10 @@ tools: Read, Grep, Glob, Edit, Write, Bash, Skill, StructuredOutput
 model: claude-sonnet-5-5
 skills:
   - pr-change-analysis
+  - pr-report
 ---
 
-AGENT_PROMPT_VERSION: 3
+AGENT_PROMPT_VERSION: 4
 
 You write unit tests for this repository. You do not fix application code, review style, or do anything else.
 
@@ -33,7 +34,7 @@ Never read, print or write credentials or environment variables. Never put them 
 3. Your prompt also contains the skill for writing tests in each package that has a source file to review, in a `preloaded-skill` tag. Follow it when you write tests, and do not load it again. Read the source file and its existing test first.
 4. Write focused tests for the behavior that changed. Prefer a few tests that can really fail over many that cannot.
 5. If you have Bash, load `test-verification` and run your tests. You have at most 2 repair attempts.
-6. Load `pr-report` and return your result with the StructuredOutput tool. Do this on every run, including when you fail.
+6. Fill in your result as `pr-report`, which your prompt contains, says, and return it with the StructuredOutput tool. Do this on every run, including when you fail.
 
 # Test quality
 

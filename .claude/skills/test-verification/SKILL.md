@@ -32,9 +32,10 @@ The script runs these checks. Do not try to get around them:
 3. Existing tests: none removed or renamed, and no file with fewer assertions than before.
 4. Prettier on changed frontend files. It rewrites them, so formatting does not use up a repair attempt.
 5. Typecheck of each package with changes.
-6. Each changed test file 3 times, twice in shuffled order, with at least one assertion required in each test. A test that fails only sometimes is rejected as flaky.
+6. Each changed test file 3 times, twice in shuffled order, with at least one assertion required in each test. A test that fails only sometimes is rejected as flaky. Then once more in `TZ=Pacific/Auckland`, because the other runs use UTC.
 7. The whole package, compared with the baseline taken before you started. A test that was already red is not your failure.
 8. Coverage of the changed source files and changed lines, before and after. This is reported and does not fail the gate.
+9. Mutations of the changed source lines, after the checks above pass. A change to the code that no test notices is reported as a warning, and can start one repair round. Some of these changes cannot alter behavior, so they never fail the gate.
 
 A change to shared test support (`backend/tests/fixture.ts`, `frontend/src/test/**`, `frontend/src/design-system/mocks.tsx`) can break tests you never touched. The report lists these changes separately.
 

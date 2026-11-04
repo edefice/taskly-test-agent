@@ -38,6 +38,18 @@ When `frontend/src/**` has a change that needs tests. If the change has no behav
 | An API function | Mock `request` from `lib/http` and assert on the call. |
 | A plain function | Call it directly. |
 
+A mock of a child component must show the props the test checks and call the callbacks it receives. If it ignores a prop, the parent can stop passing that prop and no test fails. When what a prop does is the behavior under test, use the real child. These components are made up:
+
+```tsx
+vi.mock('./ExampleForm', () => ({
+  ExampleForm: ({ busy, onCancel }: { busy: boolean; onCancel: () => void }) => (
+    <button disabled={busy} onClick={onCancel}>
+      Cancel
+    </button>
+  ),
+}))
+```
+
 ## Examples from this repository
 
 Replace the design system with the shared mock. Adjust the relative path (`frontend/src/features/todos/components/TodoItem.test.tsx`):
@@ -153,7 +165,7 @@ it('keeps the cached list when the request fails', async () => {
 
 ## Time
 
-Tests run in `TZ=UTC` in the gate, so a mistake that depends on the time zone does not show there. Never depend on the real clock or on the zone of the machine.
+The gate runs your tests in `TZ=UTC`, and once more in `Pacific/Auckland`. Never depend on the real clock or on the zone of the machine.
 
 Plain `vi.useFakeTimers()` makes `waitFor`, `findBy*` and `userEvent` hang until the test times out. Testing Library only recognizes the fake timers of Jest, so its own `setTimeout` never fires under Vitest. Passing `advanceTimers` to `userEvent.setup` does not fix this. Choose one of these:
 
@@ -162,7 +174,8 @@ Plain `vi.useFakeTimers()` makes `waitFor`, `findBy*` and `userEvent` hang until
 | No timer | Real timers. `waitFor` and `userEvent` work as usual. |
 | An exact delay, and no `waitFor`, `findBy*` or `userEvent` | Plain `vi.useFakeTimers()`. Check just before the limit and at the limit. |
 | A timer and a user action in one test | `vi.useFakeTimers({ shouldAdvanceTime: true })`. The fake clock also follows real time, so leave a margin and do not check the exact limit. Test the exact limit in the hook. |
-| Today's date | `vi.setSystemTime(new Date(2026, 5, 15, 12))`. |
+| Today's date, when the zone does not matter | `vi.setSystemTime(new Date(2026, 5, 15, 12))`. |
+| Code that uses the local date | `vi.stubEnv('TZ', ...)` in the test, and an instant where the local date and the UTC date differ. |
 
 An exact delay, with a hook and plain fake timers. This hook is made up too:
 
@@ -217,6 +230,23 @@ Today's date. The constructor with numbers means local noon, which is the same c
 vi.setSystemTime(new Date(2026, 5, 15, 12))
 ```
 
+Noon gives a stable test, but it hides a mistake, because at noon the local date and the UTC date are usually the same. To test code that uses the local date, set the zone in the test and pick an instant where the two differ. Then the test fails if the code switches to the UTC date, in every zone the gate uses. `localDay` here is made up:
+
+```ts
+afterEach(() => {
+  vi.useRealTimers()
+  vi.unstubAllEnvs()
+})
+
+it('uses the local day, east of UTC', () => {
+  vi.stubEnv('TZ', 'Pacific/Auckland')
+  vi.useFakeTimers()
+  // Still June 15 in UTC, already June 16 in Auckland.
+  vi.setSystemTime(new Date('2026-06-15T20:00:00Z'))
+  expect(localDay()).toBe('2026-06-16')
+})
+```
+
 ## Cleanup
 
 `frontend/src/test/setup.ts` already unmounts components after each test. Clean up the rest yourself, because the gate runs your tests in a random order:
@@ -225,6 +255,7 @@ vi.setSystemTime(new Date(2026, 5, 15, 12))
 |---|---|
 | `vi.useFakeTimers` or `vi.setSystemTime` | `afterEach(() => { vi.useRealTimers() })`. This also restores the real date. |
 | `vi.stubGlobal` | `afterEach(() => { vi.unstubAllGlobals() })` |
+| `vi.stubEnv` | `afterEach(() => { vi.unstubAllEnvs() })` |
 | `vi.spyOn` | `afterEach(() => { vi.restoreAllMocks() })` |
 | `vi.fn()`, also inside `vi.mock` | `beforeEach(() => { vi.clearAllMocks() })` for the calls. `vi.resetAllMocks()` also removes stubbed values. |
 
@@ -235,6 +266,7 @@ vi.setSystemTime(new Date(2026, 5, 15, 12))
 - jsdom has no `dialog.showModal`. The real `Drawer` fails on it, so use the design system mock.
 - `frontend/src/design-system/mocks.tsx` is imported by many tests. Change it only if a test cannot be written otherwise, because the gate then runs the whole package and the report lists the change separately.
 - To test code that calls `fetch`, replace `fetch` with `vi.stubGlobal` and remove it with `vi.unstubAllGlobals()` in `afterEach`.
+- In jsdom a `DOMException`, such as an `AbortError`, is not `instanceof Error`. A mock of `fetch` must not use `instanceof Error` to tell a rejection from a response. Check `error.name`, or decide in the mock which one to return.
 
 ## What to cover
 
@@ -249,6 +281,7 @@ vi.setSystemTime(new Date(2026, 5, 15, 12))
 - [ ] No snapshots. The gate rejects them.
 - [ ] Interactions use `userEvent.setup()`, not direct calls to props.
 - [ ] A test can fail if the user-visible behavior breaks.
+- [ ] A mock of a child component shows the props the test checks. Removing a prop from the parent makes a test fail.
 - [ ] Each test checks what can be observed, such as what the user sees or what a hook returns, and not implementation details such as `vi.getTimerCount()` or how many times an internal function was called.
 - [ ] Nothing depends on the real clock, the time zone or the order of the tests.
 - [ ] You can describe each test in one sentence about behavior.

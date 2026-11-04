@@ -25,7 +25,7 @@ describe('buildDiffPrompt', () => {
     const prompt = buildDiffPrompt({ analysis, nonce: 'abc' });
     const end = prompt.indexOf('</untrusted-analysis-abc>');
     assert.ok(prompt.indexOf('When tests are not needed') < prompt.indexOf('<untrusted-analysis-abc>'));
-    assert.ok(prompt.indexOf('StructuredOutput') > end);
+    assert.ok(prompt.lastIndexOf('StructuredOutput') > end);
   });
 
   it('a file name cannot close the data tag', () => {
@@ -61,15 +61,16 @@ describe('buildFilesPrompt', () => {
 
 describe('the skills in the prompt', () => {
   const ANALYSIS = 'pr-change-analysis';
+  const REPORT = 'pr-report';
   const BACKEND = 'backend-unit-tests';
   const FRONTEND = 'frontend-unit-tests';
   const inPrompt = (prompt) => [...prompt.matchAll(/<preloaded-skill name="([^"]+)">/g)].map((match) => match[1]);
 
   for (const [name, sourceFiles, expected] of [
-    ['a backend file adds the backend skill', ['backend/src/a.ts'], [ANALYSIS, BACKEND]],
-    ['a frontend file adds the frontend skill', ['frontend/src/a.tsx'], [ANALYSIS, FRONTEND]],
-    ['files in both packages add both skills', ['frontend/src/a.tsx', 'backend/src/a.ts'], [ANALYSIS, BACKEND, FRONTEND]],
-    ['no source file adds no skill for writing tests', [], [ANALYSIS]],
+    ['a backend file adds the backend skill', ['backend/src/a.ts'], [ANALYSIS, REPORT, BACKEND]],
+    ['a frontend file adds the frontend skill', ['frontend/src/a.tsx'], [ANALYSIS, REPORT, FRONTEND]],
+    ['files in both packages add both skills', ['frontend/src/a.tsx', 'backend/src/a.ts'], [ANALYSIS, REPORT, BACKEND, FRONTEND]],
+    ['no source file adds no skill for writing tests', [], [ANALYSIS, REPORT]],
   ]) {
     it(name, () => {
       assert.deepEqual(skillsForSourceFiles(sourceFiles), expected);
@@ -79,9 +80,17 @@ describe('the skills in the prompt', () => {
   }
 
   it('goes by the package and not by words in the path', () => {
-    assert.deepEqual(skillsForSourceFiles(['backend/src/frontend-proxy.ts']), [ANALYSIS, BACKEND]);
-    assert.deepEqual(skillsForSourceFiles(['frontend/src/backend/api.ts']), [ANALYSIS, FRONTEND]);
-    assert.deepEqual(skillsForSourceFiles(['backend-tools/src/a.ts']), [ANALYSIS]);
+    assert.deepEqual(skillsForSourceFiles(['backend/src/frontend-proxy.ts']), [ANALYSIS, REPORT, BACKEND]);
+    assert.deepEqual(skillsForSourceFiles(['frontend/src/backend/api.ts']), [ANALYSIS, REPORT, FRONTEND]);
+    assert.deepEqual(skillsForSourceFiles(['backend-tools/src/a.ts']), [ANALYSIS, REPORT]);
+  });
+
+  it('always places the contract of the result in the prompt, because the model skipped it in real runs', () => {
+    for (const prompt of [buildFilesPrompt({ files: ['backend/src/a.ts'] }), buildDiffPrompt({ analysis: { source_files: ['frontend/src/a.ts'] } })]) {
+      assert.match(prompt, /<preloaded-skill name="pr-report">/);
+      assert.match(prompt, /Add every new test to `tests` as its own entry/);
+      assert.doesNotMatch(prompt, /load the pr-report skill/);
+    }
   });
 
   it('places the whole skill in the prompt, with its advice and without its frontmatter', () => {
@@ -109,7 +118,7 @@ for (const [name, build] of [
       const prompt = build({ feedback: 'The test uses a fixed port.' });
       assert.ok(prompt.indexOf(FEEDBACK_INTRO) < prompt.indexOf('<untrusted-feedback-abc>'));
       assert.match(prompt, /<untrusted-feedback-abc>\nThe test uses a fixed port\.\n<\/untrusted-feedback-abc>/);
-      assert.ok(prompt.indexOf('StructuredOutput') > prompt.indexOf('</untrusted-feedback-abc>'));
+      assert.ok(prompt.lastIndexOf('StructuredOutput') > prompt.indexOf('</untrusted-feedback-abc>'));
     });
 
     it('the text cannot close the data tag', () => {

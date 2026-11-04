@@ -63,8 +63,8 @@ describe('the real agent definition', () => {
     });
   }
 
-  it('preloads the rules on when tests are needed', () => {
-    assert.deepEqual(definition.skills, ['pr-change-analysis']);
+  it('preloads the rules on when tests are needed, and the contract of the result', () => {
+    assert.deepEqual(definition.skills, ['pr-change-analysis', 'pr-report']);
   });
 
   it('preloads only skills that exist', () => {

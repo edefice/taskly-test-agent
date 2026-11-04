@@ -309,7 +309,7 @@ describe('runPipeline', () => {
     assert.deepEqual(calls.verify[0].sourceFiles, ['backend/src/a.ts']);
     const report = artifact('report.md');
     assert.match(report, /1 test written and verified/);
-    assert.match(report, /Skills preloaded: `pr-change-analysis`, `backend-unit-tests`\. Skills invoked: `backend-unit-tests`\./);
+    assert.match(report, /Skills preloaded: `pr-change-analysis`, `pr-report`, `backend-unit-tests`\. Skills invoked: `backend-unit-tests`\./);
     assert.match(report, /claude-sonnet-5-5/);
     assert.match(report, /7 turns/);
     assert.match(report, /\$0\.2500/);
@@ -333,15 +333,15 @@ describe('runPipeline', () => {
     const inReport = () => JSON.parse(artifact('report-input.json')).preloaded_skills;
 
     for (const [name, change, expected] of [
-      ['a backend source file', () => write('backend/src/a.ts', 'export const a = 2;\n'), ['pr-change-analysis', 'backend-unit-tests']],
-      ['a frontend source file', () => write('frontend/src/b.ts', 'export const b = 1;\n'), ['pr-change-analysis', 'frontend-unit-tests']],
+      ['a backend source file', () => write('backend/src/a.ts', 'export const a = 2;\n'), ['pr-change-analysis', 'pr-report', 'backend-unit-tests']],
+      ['a frontend source file', () => write('frontend/src/b.ts', 'export const b = 1;\n'), ['pr-change-analysis', 'pr-report', 'frontend-unit-tests']],
       [
         'source files in both packages',
         () => {
           write('backend/src/a.ts', 'export const a = 2;\n');
           write('frontend/src/b.ts', 'export const b = 1;\n');
         },
-        ['pr-change-analysis', 'backend-unit-tests', 'frontend-unit-tests'],
+        ['pr-change-analysis', 'pr-report', 'backend-unit-tests', 'frontend-unit-tests'],
       ],
       [
         'a backend source file and only documentation in the frontend',
@@ -349,7 +349,7 @@ describe('runPipeline', () => {
           write('backend/src/a.ts', 'export const a = 2;\n');
           write('frontend/README.md', '# x\n');
         },
-        ['pr-change-analysis', 'backend-unit-tests'],
+        ['pr-change-analysis', 'pr-report', 'backend-unit-tests'],
       ],
     ]) {
       it(`${name}: the report lists what the prompt contains`, () => {
@@ -365,8 +365,8 @@ describe('runPipeline', () => {
     it('a run on named files does the same', () => {
       const { deps } = fakes();
       runPipeline(options({ base: undefined, files: ['backend/src/a.ts'] }), deps);
-      assert.deepEqual(inPrompt(), ['pr-change-analysis', 'backend-unit-tests']);
-      assert.deepEqual(inReport(), ['pr-change-analysis', 'backend-unit-tests']);
+      assert.deepEqual(inPrompt(), ['pr-change-analysis', 'pr-report', 'backend-unit-tests']);
+      assert.deepEqual(inReport(), ['pr-change-analysis', 'pr-report', 'backend-unit-tests']);
     });
 
     it('a change with no source file has no prompt, so the report lists nothing as preloaded', () => {
@@ -384,14 +384,14 @@ describe('runPipeline', () => {
       const { deps } = fakes();
       runPipeline(options(), deps);
       const report = JSON.parse(artifact('report-input.json'));
-      assert.deepEqual(report.preloaded_skills, ['pr-change-analysis', 'backend-unit-tests']);
+      assert.deepEqual(report.preloaded_skills, ['pr-change-analysis', 'pr-report', 'backend-unit-tests']);
       assert.deepEqual(report.invoked_skills, ['backend-unit-tests']);
     });
 
     it('a dry run shows what would be preloaded', () => {
       const { deps, calls } = fakes();
       runPipeline(options({ base: undefined, files: ['backend/src/a.ts'], dryRun: true }), deps);
-      assert.ok(calls.logs.includes('Skills preloaded: pr-change-analysis, backend-unit-tests'));
+      assert.ok(calls.logs.includes('Skills preloaded: pr-change-analysis, pr-report, backend-unit-tests'));
     });
   });
 

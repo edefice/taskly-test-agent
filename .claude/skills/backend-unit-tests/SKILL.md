@@ -80,6 +80,7 @@ A test must not wait for real time, end the test process, depend on a free fixed
 | A time limit | `vi.useFakeTimers()`. Check just before the limit and at the limit. Use `await vi.advanceTimersByTimeAsync(...)` when the code also waits for a promise. |
 | `process.exit` | Replace it with `vi.spyOn(process, 'exit')`, and check the exit code. |
 | A port from the environment | `vi.stubEnv` with port `0`, so the system picks a free one. A local listener is fine. Close it in the test. |
+| `listen`, or the events of a server | A real server on port `0`. Never replace `listen` with a fake. A fake shows what you assume, and the installed version of Express can differ: Express 5 also calls the `listen` callback when the port is taken. |
 | Process signals | Call `process.emit('SIGTERM')`. Never use `process.kill`. In `afterEach`, remove only the listeners the test added, because the test runner can have its own. |
 
 The module in this example is made up. It does not exist in this repository, so read the real file and test what it does. For this module:
