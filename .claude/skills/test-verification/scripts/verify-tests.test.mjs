@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, before, beforeEach, describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { childEnv, runBaseline, runVerify } from './verify-tests.mjs';
+import { childEnv, defaultExec, runBaseline, runVerify, SECOND_TIME_ZONE } from './verify-tests.mjs';
 
 const SCRIPT = fileURLToPath(new URL('./verify-tests.mjs', import.meta.url));
 const COMMITTER = {
@@ -62,7 +62,7 @@ function fakeExec(behavior = {}) {
       const result = spawnSync('git', args, { cwd: options.cwd, encoding: 'utf8', env: { ...process.env, ...COMMITTER } });
       return { status: result.status, stdout: result.stdout, stderr: result.stderr };
     }
-    calls.push({ command, args, cwd: options.cwd });
+    calls.push({ command, args, cwd: options.cwd, timeZone: options.timeZone });
     if (args[0] === 'exec') return { status: behavior.formatStatus ?? 0, stdout: '', stderr: behavior.formatLog ?? '' };
     const [, pkg, , script] = args;
     if (script === 'typecheck') {
@@ -164,7 +164,7 @@ describe('runVerify: passing', () => {
     assert.equal(result.packages.backend.new_tests.passed, true);
     assert.equal(result.packages.backend.full_package.passed, true);
     assert.deepEqual(Object.keys(result.packages), ['backend']);
-    assert.equal(npmCalls(calls, 'test').length, 3, 'a new test runs three times');
+    assert.equal(npmCalls(calls, 'test').length, 4, 'a new test runs three times in UTC and once in another zone');
     assert.equal(npmCalls(calls, 'test:coverage').length, 1, 'the whole package runs once');
     assert.equal(npmCalls(calls, 'typecheck').length, 1);
   });
@@ -184,6 +184,55 @@ describe('runVerify: passing', () => {
       assert.ok(args.includes('tests/new.test.ts'));
       assert.ok(args.includes('--expect.requireAssertions'));
     }
+  });
+
+  it('runs the changed tests once more in a second time zone, and only that run changes the zone', () => {
+    write(NEW_TEST, NEW_TEST_BODY);
+    const { exec, calls } = fakeExec();
+    const result = runVerify({ repo, exec });
+    const runs = npmCalls(calls, 'test');
+    assert.deepEqual(runs.map(({ timeZone }) => timeZone), [undefined, undefined, undefined, SECOND_TIME_ZONE]);
+    assert.ok(runs[3].args.includes('tests/new.test.ts'));
+    assert.ok(runs[3].args.includes('--expect.requireAssertions'));
+    assert.equal(npmCalls(calls, 'test:coverage')[0].timeZone, undefined);
+    assert.deepEqual(result.packages.backend.new_tests.second_time_zone, { zone: SECOND_TIME_ZONE, ran: true, failed: [] });
+    assert.equal(result.status, 'passed');
+  });
+
+  it('rejects a test that passes in UTC and fails in the second zone, and names the zone', () => {
+    write(NEW_TEST, NEW_TEST_BODY);
+    const { exec } = fakeExec({ tests: (pkg, script, args, runIndex) => [test('tests/new.test.ts', 'new behavior', script === 'test' && runIndex === 3 ? 'failed' : 'passed')] });
+    const result = runVerify({ repo, exec });
+    assert.equal(result.status, 'failed');
+    const failure = result.failures.find(({ check }) => check === 'time-zone');
+    assert.match(failure.message, /1 test\(s\) passed in UTC and failed in Pacific\/Auckland/);
+    assert.equal(failure.tests[0].id, 'backend/tests/new.test.ts > new behavior');
+    assert.equal(result.failures.some(({ check }) => check === 'flaky-tests'), false, 'it is not called flaky');
+    assert.equal(result.packages.backend.new_tests.passed, false);
+    assert.deepEqual(result.packages.backend.new_tests.second_time_zone.failed, ['backend/tests/new.test.ts > new behavior']);
+  });
+
+  it('does not report a test twice when it fails in every run', () => {
+    write(NEW_TEST, NEW_TEST_BODY);
+    const { exec } = fakeExec({ tests: () => [test('tests/new.test.ts', 'new behavior', 'failed')] });
+    const result = runVerify({ repo, exec });
+    assert.ok(result.failures.some(({ check }) => check === 'new-tests'));
+    assert.equal(result.failures.some(({ check }) => check === 'time-zone'), false);
+  });
+
+  it('rejects when the run in the second zone gives no report', () => {
+    write(NEW_TEST, NEW_TEST_BODY);
+    const { exec } = fakeExec({ tests: (pkg, script, args, runIndex) => (script === 'test' && runIndex === 3 ? null : [test('tests/new.test.ts', 'new behavior')]) });
+    const result = runVerify({ repo, exec });
+    assert.equal(result.status, 'failed');
+    assert.match(result.failures.find(({ check }) => check === 'time-zone').message, /without a report in Pacific\/Auckland/);
+    assert.equal(result.packages.backend.new_tests.second_time_zone.ran, false);
+  });
+
+  it('sets the zone for a real child process, and UTC by default', () => {
+    const zoneOf = (options) => defaultExec(process.execPath, ['-e', 'process.stdout.write(process.env.TZ)'], { cwd: repo, ...options }).stdout;
+    assert.equal(zoneOf({}), 'UTC');
+    assert.equal(zoneOf({ timeZone: SECOND_TIME_ZONE }), SECOND_TIME_ZONE);
   });
 
   it('shuffles the second and third run with fixed seeds', () => {
