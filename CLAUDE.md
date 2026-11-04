@@ -18,10 +18,11 @@ Run these from the repository root.
 | Frontend typecheck | `npm --prefix frontend run typecheck` |
 | Frontend format check | `npm --prefix frontend run format:check` |
 | Agent tooling tests | `npm test` |
+| Check all workflows, before committing a change to one | `actionlint` |
 | Run the agent on a branch | `npm run test-agent -- --base main` |
 | Show what it would do, with no API key | `npm run test-agent -- --base main --dry-run` |
 
-Fresh setup: `npm ci` in each package. The backend needs `prisma generate`, which its `postinstall` runs. Tests need no database.
+Fresh setup: `npm ci` in each package. The backend needs `prisma generate`, which its `postinstall` runs. Tests need no database. `actionlint` is installed separately, for example with `brew install actionlint`.
 
 ## Dependency versions
 
