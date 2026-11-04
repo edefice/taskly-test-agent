@@ -32,17 +32,17 @@ const addUp = (values) => {
  * @param {object} [state.commit] commit.json.
  * @param {boolean} [state.scanBlocked] The scan stopped the output of a round.
  */
-export function buildReportInput({ guard, analysis, regressionCheck, rounds, commit, scanBlocked, headSha, runUrl, promptVersion, model, preloadedSkills }) {
+export function buildReportInput({ guard, analysis, regressionCheck, rounds, commit, scanBlocked, headSha, runUrl, promptVersion, preloadedSkills }) {
   const base = { analysis, head_sha: headSha, run_url: runUrl, prompt_version: promptVersion, regression_check: regressionCheck ?? undefined };
   const records = rounds.map(({ record }) => record);
   const usage = {
-    model: records.findLast(({ usage: used }) => used?.model)?.usage.model ?? model,
+    model: records.findLast(({ usage: used }) => used?.model)?.usage.model,
     turns: addUp(records.map(({ usage: used }) => used?.turns)),
     cost_usd: addUp(records.map(({ usage: used }) => used?.cost_usd)),
     blocked_calls: addUp(records.map(({ usage: used }) => used?.blocked_calls)),
   };
-  if (!guard) return { ...base, outcome: 'agent_failed', failure_reason: 'The analysis of this pull request failed, so the agent did not run.', usage: { model } };
-  if (!guard.run) return { ...base, outcome: guard.outcome ?? 'skipped', usage: { model } };
+  if (!guard) return { ...base, outcome: 'agent_failed', failure_reason: 'The analysis of this pull request failed, so the agent did not run.' };
+  if (!guard.run) return { ...base, outcome: guard.outcome ?? 'skipped' };
 
   const run = {
     ...base,
@@ -130,7 +130,6 @@ async function main(env = process.env) {
     headSha: pullRequest.head.sha,
     runUrl: `${env.GITHUB_SERVER_URL}/${env.GITHUB_REPOSITORY}/actions/runs/${env.GITHUB_RUN_ID}`,
     promptVersion: definition.promptVersion,
-    model: definition.model,
     preloadedSkills: skillsForSourceFiles(analysis?.source_files ?? [], TOOLS_ROOT),
   });
   const report = renderReport(input);

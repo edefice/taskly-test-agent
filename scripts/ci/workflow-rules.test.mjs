@@ -34,8 +34,9 @@ jobs:
       - name: Run the agent
         id: agent
         uses: anthropics/claude-code-action@${SHA}
-        env:
-          ANTHROPIC_API_KEY: \${{ secrets.ANTHROPIC_API_KEY }}
+        with:
+          anthropic_api_key: \${{ secrets.ANTHROPIC_API_KEY }}
+          classify_inline_comments: 'false'
       - name: Scan the output for the key
         id: scan
         working-directory: \${{ runner.temp }}
@@ -76,7 +77,8 @@ const swap = (text, from, to) => {
   assert.ok(text.includes(from), `the fixture has no: ${from}`);
   return text.replace(from, to);
 };
-const ACTION_KEY = `uses: anthropics/claude-code-action@${SHA}\n        env:\n          ANTHROPIC_API_KEY: \${{ secrets.ANTHROPIC_API_KEY }}`;
+const ACTION_KEY = '          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}\n';
+const SCAN_KEY = '        working-directory: ${{ runner.temp }}\n        env:\n          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}\n';
 
 describe('parseWorkflow', () => {
   it('reads jobs and steps', () => {
@@ -151,10 +153,18 @@ describe('checkSecretIsolation', () => {
 
   for (const [name, round, expected] of [
     ['a third step with the key', swap(ROUND, '      - name: Build the prompt\n        id: prompt\n', '      - name: Build the prompt\n        id: prompt\n        env:\n          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}\n'), /exactly two steps/],
-    ['the key only in the action', swap(ROUND, '        working-directory: ${{ runner.temp }}\n        env:\n          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}\n', '        working-directory: ${{ runner.temp }}\n'), /exactly two steps/],
+    ['the key only in the action', swap(ROUND, SCAN_KEY, '        working-directory: ${{ runner.temp }}\n'), /exactly two steps/],
     ['the key in the verify job', swap(ROUND, '      - run: npm ci', '      - run: npm ci\n        env:\n          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}'), /2 jobs use the key/],
-    ['the key under another env name', swap(ROUND, ACTION_KEY, ACTION_KEY.replace('ANTHROPIC_API_KEY: ${{', 'KEY: ${{')), /one env entry/],
-    ['the key in a with block', swap(ROUND, ACTION_KEY, `uses: anthropics/claude-code-action@${SHA}\n        with:\n          anthropic_api_key: \${{ secrets.ANTHROPIC_API_KEY }}`), /one env entry/],
+    ['the key under another env name in the scan', swap(ROUND, SCAN_KEY, SCAN_KEY.replace('ANTHROPIC_API_KEY: ${{', 'KEY: ${{')), /one env entry/],
+    ['the key in the env of the action, where the steps inside it see it', swap(ROUND, `        with:\n${ACTION_KEY}`, '        env:\n          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}\n        with:\n'), /as the input anthropic_api_key/],
+    ['the key in both the input and the env of the action', swap(ROUND, `        with:\n${ACTION_KEY}`, `        env:\n          ANTHROPIC_API_KEY: \${{ secrets.ANTHROPIC_API_KEY }}\n        with:\n${ACTION_KEY}`), /as the input anthropic_api_key/],
+    ['the key as another input of the action', swap(ROUND, ACTION_KEY, '          claude_code_oauth_token: ${{ secrets.ANTHROPIC_API_KEY }}\n'), /as the input anthropic_api_key/],
+    ['a second use of the key after the right one', swap(ROUND, ACTION_KEY, `${ACTION_KEY}          claude_code_oauth_token: \${{ secrets.ANTHROPIC_API_KEY }}\n`), /as the input anthropic_api_key/],
+    ['a second use of the key in the scan', swap(ROUND, SCAN_KEY, `${SCAN_KEY}          OTHER: \${{ secrets.ANTHROPIC_API_KEY }}\n`), /one env entry/],
+    ['another command hidden in an if', swap(ROUND, 'run: mv agent-tools "$RUNNER_TEMP/tools"', 'run: if [ -f package.json ]; then npm ci; fi'), /runs a command it may not/],
+    ['another command in place of the sysctl', swap(ROUND, 'run: mv agent-tools "$RUNNER_TEMP/tools"', 'run: if [ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then sudo sh -c "cat /proc/1/environ"; fi'), /runs a command it may not/],
+    ['another package in the install', swap(ROUND, 'run: mv agent-tools "$RUNNER_TEMP/tools"', 'run: for i in 1 2 3; do sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends evil && break; echo "apt-get attempt $i failed, retrying..."; sleep 5; done'), /runs a command it may not/],
+    ['inline comments on, because that step gets the key', swap(ROUND, "          classify_inline_comments: 'false'\n", ''), /classify_inline_comments off/],
     ['a scan from the checkout of the pull request', swap(ROUND, 'node "$TOOLS/scripts/ci/scan-secret.mjs" out', 'node scripts/ci/scan-secret.mjs out'), /only run the script from the base/],
     ['a scan with more commands', swap(ROUND, 'run: node "$TOOLS/scripts/ci/scan-secret.mjs" out', 'run: |\n          node "$TOOLS/scripts/ci/scan-secret.mjs" out\n          mv out x'), /only run the script from the base/],
     ['a scan that starts in the checkout', swap(ROUND, '        working-directory: ${{ runner.temp }}\n', ''), /outside the checkout/],
@@ -209,6 +219,22 @@ describe('the workflows in this repository', () => {
       const names = [...text.matchAll(/secrets\.(\w+)/g)].map(([, name]) => name);
       assert.deepEqual(names.filter((name) => name !== 'ANTHROPIC_API_KEY'), [], file);
     }
+  });
+
+  it('install what the isolation needs before the agent, and keep the isolation on', () => {
+    const { jobs } = parseWorkflow(realWorkflows()['test-agent-round.yml']);
+    const { steps } = jobs.find(({ name }) => name === 'agent');
+    const install = steps.findIndex(({ run }) => run?.some((line) => line.includes('bubblewrap')));
+    const agent = steps.findIndex(({ id }) => id === 'agent');
+    assert.ok(install !== -1 && install < agent);
+    assert.ok(!/secrets\./.test(steps[install].text), 'the install step has no key');
+    assert.match(steps[agent].text, /CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1'/);
+  });
+
+  it('tell the report how the agent step ended, from a value that exists when it fails', () => {
+    const { jobs } = parseWorkflow(realWorkflows()['test-agent-round.yml']);
+    const collect = jobs.find(({ name }) => name === 'agent').steps.find(({ name }) => name === 'Collect what the agent did');
+    assert.match(collect.text, /AGENT_OUTCOME: \$\{\{ steps\.agent\.outcome \}\}/);
   });
 
   it('run the agent without Bash, through the arguments the tests cover', () => {

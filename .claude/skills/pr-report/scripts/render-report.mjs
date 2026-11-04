@@ -224,7 +224,8 @@ function runFacts(input) {
   if (runUrl) facts.push(`[Run and logs](${runUrl})`);
   facts.push(`Commit ${safeCode(String(input.head_sha ?? 'unknown').slice(0, 12))}`);
   if (input.commit_sha) facts.push(`Test commit ${safeCode(String(input.commit_sha).slice(0, 12))}`);
-  facts.push(`Model ${safeCode(input.usage?.model ?? 'unknown')}`);
+  // Only what a transcript shows. A run that called no model must not name one.
+  if (input.usage?.model) facts.push(`Model ${safeCode(input.usage.model)}`);
   facts.push(`Prompt version ${safeCode(input.prompt_version ?? 'unknown')}`);
   if (input.repair_rounds > 0) facts.push(`${input.repair_rounds} repair ${input.repair_rounds === 1 ? 'round' : 'rounds'}`);
   if (Number.isFinite(input.usage?.turns)) facts.push(`${input.usage.turns} turns`);

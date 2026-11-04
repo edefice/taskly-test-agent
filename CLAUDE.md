@@ -106,4 +106,6 @@ Add to this list after each mistake.
 - macOS has no `timeout` command, and a missing command in a chain can look like a finished step. Set the limit in the tool that runs the command.
 - `spawnSync` blocks the whole process, so a server in the same process cannot answer the child. Use `spawn` when the child talks to it.
 - A workflow can pass every test and still fail on the first real run, for example a shallow checkout where a script needs the merge base. Read the YAML against what each script needs, and rehearse the steps with real tools before a paid run.
+- On Linux, `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` makes Claude Code refuse to start without `bubblewrap`, and a run on macOS or a rehearsal with the model stood in for does not show it. It stopped the first real run on GitHub.
+- The `env` of a step that uses a composite action reaches every step inside that action. Give a secret as an input, and read the `action.yml` to see where the input goes.
 - The guard hook reads command text, so any Bash command containing `git` followed by a word can be blocked, even in a string. If that is a false alarm, use the Grep tool or a file for the text.

@@ -241,7 +241,6 @@ export function runPipeline(options, deps = {}) {
     head_sha: git(repo, ['rev-parse', 'HEAD']).trim(),
     prompt_version: definition.promptVersion,
     preloaded_skills: preloadedSkills,
-    usage: { model: definition.model },
   };
 
   if (options.dryRun) {
@@ -287,7 +286,7 @@ export function runPipeline(options, deps = {}) {
 
   const maxRounds = options.repairRounds ?? 0;
   // A run with no transcript has no numbers, and the report must not show them as zero.
-  const totals = { model: definition.model, turns: null, cost_usd: null, blocked_calls: null };
+  const totals = { model: null, turns: null, cost_usd: null, blocked_calls: null };
   const addUp = (sum, value) => (Number.isFinite(value) ? (sum ?? 0) + value : sum);
   const invokedSkills = new Set();
   let feedback = steps.feedback;
