@@ -528,7 +528,7 @@ describe('renderReport', () => {
 
   it('shows n/a for coverage it does not have', () => {
     const packages = { backend: { ...verification.packages.backend, coverage: { total: { before: null, after: { lines: { pct: 40 }, branches: { pct: 30 } } }, files: [] } } };
-    assert.match(markdown({ verification: { ...verification, packages } }), /\| n\/a \| 40% \|/);
+    assert.match(markdown({ verification: { ...verification, packages } }), /\| n\/a → 40% \|/);
   });
 
   it('rejects an outcome it does not know', () => {
@@ -642,6 +642,81 @@ describe('renderReport', () => {
     const report = renderReport(input({ verification: { ...verification, failures, shared_test_support: shared }, regression_check: { regressions: list, baseline_red: list.map((v, i) => `${v}${i}`) } }));
     assert.ok(report.markdown.length <= MAX_REPORT_LENGTH + 100);
     assert.ok(report.markdown.length < 65536);
+  });
+});
+
+describe('renderReport: coverage', () => {
+  const metric = (pct) => ({ pct });
+  const metrics = (lines, branches, functions, statements) => ({ lines: metric(lines), branches: metric(branches), functions: metric(functions), statements: metric(statements) });
+  const file = (before, after, path = 'backend/src/a.ts') => ({ path, before, after, changed_lines: null });
+  const verificationWith = (files) => ({ changed_files: [], shared_test_support: [], failures: [], packages: { backend: { coverage: { total: { before: metrics(10, 20, 30, 40), after: metrics(11, 21, 31, 41) }, files } } } });
+  const render = (files, overrides = {}) => renderReport({ outcome: 'tests_added', result: validResult(), head_sha: 'abc', usage: {}, verification: verificationWith(files), ...overrides }).markdown;
+
+  it('shows all four metrics, before and after, for the package', () => {
+    const markdown = render([]);
+    assert.match(markdown, /\| \| Lines \| Branches \| Functions \| Statements \| Changed lines covered \|/);
+    assert.match(markdown, /`backend \(package\)` \| 10% → 11% \| 20% → 21% \| 30% → 31% \| 40% → 41% \| \|/);
+  });
+
+  it('shows all four metrics for a file, so 100% of lines cannot hide a function that never ran', () => {
+    const markdown = render([file(metrics(0, 0, 0, 0), metrics(100, 100, 83.33, 88))]);
+    assert.match(markdown, /`backend\/src\/a\.ts` \| 0% → 100% \| 0% → 100% \| 0% → 83\.33% \| 0% → 88% \| n\/a \|/);
+  });
+
+  it('shows n/a for a metric it does not have', () => {
+    assert.match(render([file(null, metrics(1, 2, 3, 4))]), /n\/a → 1%/);
+  });
+
+  describe('warning when coverage did not grow', () => {
+    it('warns about a file the new tests did not change', () => {
+      const markdown = render([file(metrics(50, 50, 50, 50), metrics(50, 50, 50, 50))]);
+      assert.match(markdown, /#### Coverage did not grow\n\n- `backend\/src\/a\.ts`: the new tests did not raise its coverage/);
+      assert.match(markdown, /does not block the pull request/);
+    });
+
+    for (const [name, after] of [
+      ['lines', metrics(51, 50, 50, 50)],
+      ['branches', metrics(50, 51, 50, 50)],
+      ['functions', metrics(50, 50, 51, 50)],
+      ['statements', metrics(50, 50, 50, 51)],
+    ]) {
+      it(`does not warn when only ${name} grew`, () => {
+        assert.doesNotMatch(render([file(metrics(50, 50, 50, 50), after)]), /Coverage did not grow/);
+      });
+    }
+
+    it('does not warn about a file already at 100%, which cannot grow', () => {
+      assert.doesNotMatch(render([file(metrics(100, 100, 100, 100), metrics(100, 100, 100, 100))]), /Coverage did not grow/);
+    });
+
+    it('warns when one metric is below 100%, because it could still grow', () => {
+      assert.match(render([file(metrics(100, 100, 100, 88), metrics(100, 100, 100, 88))]), /Coverage did not grow/);
+    });
+
+    it('does not warn about a new file with nothing to compare', () => {
+      assert.doesNotMatch(render([file(null, metrics(50, 50, 50, 50))]), /Coverage did not grow/);
+      assert.doesNotMatch(render([file(metrics(50, 50, 50, 50), null)]), /Coverage did not grow/);
+    });
+
+    it('does not warn when no tests were accepted', () => {
+      assert.doesNotMatch(render([file(metrics(50, 50, 50, 50), metrics(50, 50, 50, 50))], { outcome: 'tests_rejected' }), /Coverage did not grow/);
+    });
+
+    it('does not call a file flat when a metric is missing, because it cannot tell', () => {
+      const lines = { lines: metric(50) };
+      assert.doesNotMatch(render([file(lines, lines)]), /Coverage did not grow/);
+    });
+
+    it('never changes the check result', () => {
+      const report = renderReport({ outcome: 'tests_added', result: validResult(), head_sha: 'abc', usage: {}, verification: verificationWith([file(metrics(50, 50, 50, 50), metrics(50, 50, 50, 50))]) });
+      assert.equal(report.conclusion, 'success');
+    });
+  });
+
+  it('names the second time zone when the changed tests ran in it', () => {
+    const packages = { backend: { new_tests: { total: 2, runs: 3, passed: true, second_time_zone: { zone: 'Pacific/Auckland', ran: true, failed: [] } } } };
+    const markdown = renderReport({ outcome: 'tests_added', result: validResult(), head_sha: 'abc', usage: {}, verification: { changed_files: [], shared_test_support: [], failures: [], packages } }).markdown;
+    assert.match(markdown, /2 tests, 3 runs, also in `Pacific\/Auckland`: passed/);
   });
 });
 
