@@ -16,6 +16,7 @@ export const REPORT_MARKER = '<!-- unit-test-agent-report -->';
 export const SOURCE_NOTE = 'Test descriptions and possible bugs are reported by the agent and not verified. Test results, coverage and the check result come from the gate.';
 export const MAX_REPORT_LENGTH = 60000;
 const MAX_LIST_ITEMS = 30;
+const MAX_MUTANTS_IN_REPORT = 10;
 const RUN_URL = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/actions\/runs\/\d+(?:\/attempts\/\d+)?$/;
 
 export const OUTCOMES = [
@@ -163,6 +164,32 @@ function gateFailures(failures) {
   });
 }
 
+const MUTATION_NOT_RUN = {
+  timed_out: 'hit the time limit, so there is no result',
+  failed: 'could not run, see the run artifact',
+};
+
+/** What the mutation check found. It is a warning and has no part in the check result. */
+function mutationLines(mutation) {
+  if (!mutation) return [];
+  if (mutation.status === 'skipped') return [`Not run. ${safeText(mutation.reason, 200)}`];
+  const packages = Object.entries(mutation.packages ?? {}).map(([name, entry]) => {
+    if (MUTATION_NOT_RUN[entry.status]) return `- ${safeCode(name)} ${MUTATION_NOT_RUN[entry.status]}.`;
+    const missed = entry.survived + entry.no_coverage;
+    return `- ${safeCode(name)}: ${entry.caught} of ${entry.total} changes to the changed lines made a test fail, ${missed} did not.`;
+  });
+  const skipped = mutation.skipped_paths ?? [];
+  if (skipped.length > 0) packages.push(`- Not checked, because of unusual file names: ${skipped.slice(0, 5).map((path) => safeCode(path)).join(', ')}`);
+  const mutants = mutation.mutants ?? [];
+  const behavior = mutants.filter(({ data_only: dataOnly }) => !dataOnly);
+  const listed = behavior.slice(0, MAX_MUTANTS_IN_REPORT).map(({ path, line, original, replacement }) => `- ${safeCode(`${path}:${line}`)}: ${safeCode(original)} became ${safeCode(replacement)}`);
+  if (behavior.length > listed.length) listed.push(`- and ${behavior.length - listed.length} more, see the run artifact`);
+  const dataOnly = mutants.length - behavior.length;
+  if (dataOnly > 0) listed.push(`- ${dataOnly} more changed only text or data, see the run artifact`);
+  const heading = behavior.length > 0 ? ['', 'No test noticed these changes to the code, so these behaviors may be unchecked. This is a warning and does not block the pull request:', ''] : [];
+  return [...packages, ...heading, ...listed];
+}
+
 function runFacts(input) {
   const facts = [];
   const runUrl = safeRunUrl(input.run_url);
@@ -171,6 +198,7 @@ function runFacts(input) {
   if (input.commit_sha) facts.push(`Test commit ${safeCode(String(input.commit_sha).slice(0, 12))}`);
   facts.push(`Model ${safeCode(input.usage?.model ?? 'unknown')}`);
   facts.push(`Prompt version ${safeCode(input.prompt_version ?? 'unknown')}`);
+  if (input.repair_rounds > 0) facts.push(`${input.repair_rounds} repair ${input.repair_rounds === 1 ? 'round' : 'rounds'}`);
   if (Number.isFinite(input.usage?.turns)) facts.push(`${input.usage.turns} turns`);
   if (Number.isFinite(input.usage?.cost_usd)) facts.push(`$${input.usage.cost_usd.toFixed(4)}`);
   // A blocked call can be an honest mistake or the sign of an injection attempt.
@@ -189,6 +217,9 @@ function runFacts(input) {
  * @param {string[]} [input.invoked_skills] Skills the transcript shows the agent calling.
  * @param {{ regressions: string[], baseline_red?: string[] }} [input.regression_check]
  * @param {{ model?: string, turns?: number, cost_usd?: number, blocked_calls?: number }} [input.usage]
+ * @param {object} [input.mutation] Output of mutate-changed-lines. A warning, never part of the conclusion.
+ * @param {number} [input.repair_rounds] Attempts after the first one.
+ * @param {string} [input.repair_note] Why the tests in the report come from an earlier attempt.
  */
 export function renderReport(input) {
   if (!OUTCOMES.includes(input.outcome)) throw new Error('Unknown outcome.');
@@ -198,6 +229,7 @@ export function renderReport(input) {
   const packages = verification?.packages ?? {};
   const regressions = regressionCheck?.regressions ?? [];
   const lines = [REPORT_MARKER, `### Unit test agent: ${title}`, '', explanation(input), ''];
+  if (input.repair_note) lines.push(safeText(input.repair_note, 400), '');
 
   if (regressions.length > 0) {
     lines.push(
@@ -226,6 +258,7 @@ export function renderReport(input) {
   );
   lines.push(...section('Test results', testResultRows(packages)));
   lines.push(...section('Coverage', coverageRows(packages)));
+  lines.push(...section('Mutation check', mutationLines(input.mutation)));
 
   const baselineRed = [
     ...(regressionCheck?.baseline_red ?? []),
