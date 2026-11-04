@@ -11,6 +11,9 @@ backend/src/generated/prisma/
 # Test coverage
 coverage/
 
+# Mutation testing sandbox
+.stryker-tmp/
+
 # Local environment variables
 .env
 .env.*
