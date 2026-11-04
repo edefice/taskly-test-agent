@@ -38,8 +38,13 @@ describe('resolveDatabaseUrl', () => {
   });
 
   it('encodes special characters in the database name', () => {
-    vi.stubEnv('POSTGRES_DB', 'my db');
-    expect(resolveDatabaseUrl()).toBe('postgresql://user:secret@db.example:5433/my%20db');
+    vi.stubEnv('POSTGRES_DB', 'a/b');
+    expect(resolveDatabaseUrl()).toBe('postgresql://user:secret@db.example:5433/a%2Fb');
+  });
+
+  it('encodes a percent sign in the database name', () => {
+    vi.stubEnv('POSTGRES_DB', 'a%b');
+    expect(resolveDatabaseUrl()).toBe('postgresql://user:secret@db.example:5433/a%25b');
   });
 
   it.each(Object.keys(parts))('throws when %s is missing', (name) => {
