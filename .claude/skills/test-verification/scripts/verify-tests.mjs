@@ -18,7 +18,7 @@ import { classifyTestPath } from '../../../lib/test-paths.mjs';
 import { analyzeChanges } from '../../pr-change-analysis/scripts/analyze-changes.mjs';
 import { changedLinesFromDiff, clearCoverage, compareCoverage, readCoverage, serializableCoverage } from './lib/coverage.mjs';
 import { sanitizeLog } from './lib/sanitize-log.mjs';
-import { checkTestFile } from './lib/test-rules.mjs';
+import { checkTestFile, compareTestFile } from './lib/test-rules.mjs';
 import { compareRuns, summarizeReport } from './lib/vitest-results.mjs';
 
 export const PACKAGES = ['backend', 'frontend'];
@@ -27,6 +27,8 @@ export const NEW_TEST_RUNS = 3;
 const COMMAND_TIMEOUT_MS = 5 * 60 * 1000;
 // The later runs change the order, which also finds tests that depend on each other.
 const SHUFFLE_SEEDS = [null, 4242, 7331];
+// Far from UTC, so a date that is wrong by a day shows here.
+export const SECOND_TIME_ZONE = 'Pacific/Auckland';
 
 const SECRET_ENV = /^(?:ANTHROPIC_|CLAUDE_CODE_OAUTH|GH_TOKEN$|GITHUB_TOKEN$|GH_ENTERPRISE_TOKEN$|GITHUB_ENTERPRISE_TOKEN$|ACTIONS_(?:ID_TOKEN|RUNTIME)|AWS_|NPM_TOKEN$)/;
 
@@ -36,10 +38,10 @@ export function childEnv(env = process.env) {
   return { ...clean, CI: 'true', TZ: 'UTC' };
 }
 
-export function defaultExec(command, args, { cwd, timeoutMs = COMMAND_TIMEOUT_MS }) {
+export function defaultExec(command, args, { cwd, timeoutMs = COMMAND_TIMEOUT_MS, timeZone }) {
   const result = spawnSync(command, args, {
     cwd,
-    env: childEnv(),
+    env: { ...childEnv(), ...(timeZone ? { TZ: timeZone } : {}) },
     encoding: 'utf8',
     maxBuffer: 256 * 1024 * 1024,
     timeout: timeoutMs,
@@ -62,14 +64,14 @@ function git(exec, repo, args) {
 }
 
 /** Runs one Vitest script and reads its JSON report. A missing report means a crash. */
-function runVitest(exec, repo, packageName, script, args) {
+export function runVitest(exec, repo, packageName, script, args, options = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'verify-tests-'));
   const outputFile = join(directory, 'report.json');
   try {
     const result = exec(
       'npm',
       ['--prefix', packageName, 'run', script, '--', '--reporter=json', `--outputFile=${outputFile}`, ...args],
-      { cwd: repo },
+      { cwd: repo, ...options },
     );
     let summary = null;
     try {
@@ -153,6 +155,16 @@ function checkRules(exec, repo, changes) {
   return { violations, existingTestsChanged, newTests };
 }
 
+/** Facts about existing test files, from the code alone, after any formatting. The report trusts these over the agent. */
+function modifiedTestFiles(exec, repo, changes) {
+  const modified = [];
+  for (const { path } of changes) {
+    const before = fileAtHead(exec, repo, path);
+    if (before !== null) modified.push({ path, ...compareTestFile({ before, after: readFileSync(join(repo, path), 'utf8') }) });
+  }
+  return modified;
+}
+
 export function changedLinesFor(exec, repo, mergeBase, sourceFiles) {
   const lines = new Map();
   if (!mergeBase) return lines;
@@ -189,12 +201,27 @@ function verifyNewTests(exec, repo, packageName, testFiles, failures) {
   if (flaky.length > 0) {
     failures.push({ check: 'flaky-tests', package: packageName, message: `${flaky.length} test(s) failed in only some runs.`, tests: flaky });
   }
+  // Every run so far used UTC, where a mistake about the local date does not show.
+  const zoneRun = runVitest(exec, repo, packageName, 'test', ['--expect.requireAssertions', ...filters], { timeZone: SECOND_TIME_ZONE });
+  const known = new Set([...failed, ...flaky].map(({ id }) => id));
+  const zoneFailed = (zoneRun.summary?.failed ?? []).filter(({ id }) => !known.has(id));
+  if (zoneRun.summary === null) {
+    failures.push({
+      check: 'time-zone',
+      package: packageName,
+      message: `${zoneRun.timedOut ? 'The test run timed out' : 'The test run ended without a report'} in ${SECOND_TIME_ZONE}.`,
+      log: zoneRun.log,
+    });
+  } else if (zoneFailed.length > 0) {
+    failures.push({ check: 'time-zone', package: packageName, message: `${zoneFailed.length} test(s) passed in UTC and failed in ${SECOND_TIME_ZONE}.`, tests: zoneFailed });
+  }
   return {
     runs: runs.length,
-    passed: failed.length === 0 && flaky.length === 0,
+    passed: failed.length === 0 && flaky.length === 0 && zoneRun.summary !== null && zoneFailed.length === 0,
     total: runs[0].summary.total,
     failed: failed.map(({ id }) => id),
     flaky: flaky.map(({ id }) => id),
+    second_time_zone: { zone: SECOND_TIME_ZONE, ran: zoneRun.summary !== null, failed: zoneFailed.map(({ id }) => id) },
   };
 }
 
@@ -272,6 +299,7 @@ export function runVerify({ repo, mergeBase, sourceFiles = [], baseline, exec = 
     changed_files: changes.map(({ path }) => ({ path, class: classifyTestPath(path) })),
     shared_test_support: changes.map(({ path }) => path).filter((path) => classifyTestPath(path) === 'shared-test-support'),
     existing_tests_changed: [],
+    modified_test_files: [],
     new_tests: [],
     packages: {},
     failures,
@@ -346,6 +374,7 @@ export function runVerify({ repo, mergeBase, sourceFiles = [], baseline, exec = 
       changedLines,
     });
   }
+  report.modified_test_files = modifiedTestFiles(exec, repo, changes);
   return finish();
 }
 

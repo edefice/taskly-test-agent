@@ -21,7 +21,7 @@ Before you finish a run, whatever the outcome. A run with no valid result counts
 2. List every file you created or changed in `files`.
 3. Add every new test to `tests` as its own entry: its exact title as `name`, and one sentence about the behavior it checks. Do not group tests. The gate compares these with the file and rejects a result that misses a test.
 4. Fill in the other lists, or leave them empty:
-   - `existing_tests_changed`: an existing test you changed, and why the pull request requires it.
+   - `existing_tests_changed`: an existing test you changed, and why the pull request requires it. Adding an assertion to an existing test is a change, so list it, and do not write that the test is unchanged.
    - `suspected_bugs`: application behavior that looks wrong, with what you expected and what happens.
    - `regressions`: existing tests the pull request breaks. Do not fix these.
 5. Return the result with the `StructuredOutput` tool.
@@ -32,8 +32,9 @@ Before you finish a run, whatever the outcome. A run with no valid result counts
 |---|---|---|
 | Decision, reasoning, test descriptions | Your result | Only you know why. |
 | Changed files | The gate | The result must match them, or it is rejected. |
+| Existing test files modified | The diff | Shown whatever you say. If you say an existing test is unchanged and the diff shows otherwise, the report marks the mismatch. |
 | Test results and coverage | The gate | Your opinion of your tests does not count. |
-| Skills preloaded | Code: the `skills` field in the agent definition, and the skill for writing tests in each package with a source file | Code places them in your prompt, so they are certain to reach you. |
+| Skills preloaded | Code: the `skills` field in the agent definition, which includes this skill, and the skill for writing tests in each package with a source file | Code places them in your prompt, so they are certain to reach you. |
 | Skills invoked | The transcript | It records real tool calls. |
 | Check result (green, neutral, red) | Code | Red means existing tests pass on the base commit and fail on the pull request. Your `regressions` list cannot turn the check red. |
 | Turns, cost, model | The transcript | Measured, not stated. |

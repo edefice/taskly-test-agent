@@ -46,6 +46,69 @@ function addedLines(before, after) {
   return added;
 }
 
+/** Finds where a call ends, from inside its parentheses. Strings and comments do not count. Null if it cannot tell. */
+function endOfCall(content, start) {
+  let depth = 1;
+  let index = start;
+  while (index < content.length) {
+    const character = content[index];
+    if (character === '/' && content[index + 1] === '/') {
+      const end = content.indexOf('\n', index);
+      if (end === -1) return null;
+      index = end;
+    } else if (character === '/' && content[index + 1] === '*') {
+      const end = content.indexOf('*/', index + 2);
+      if (end === -1) return null;
+      index = end + 1;
+    } else if (character === "'" || character === '"' || character === '`') {
+      index += 1;
+      while (index < content.length && content[index] !== character) index += content[index] === '\\' ? 2 : 1;
+    } else if ('([{'.includes(character)) {
+      depth += 1;
+    } else if (')]}'.includes(character)) {
+      depth -= 1;
+      if (depth === 0) return index;
+    }
+    index += 1;
+  }
+  return null;
+}
+
+/** The code of each test by title, without whitespace, so formatting alone is not a change. */
+function testBodies(content) {
+  const bodies = new Map();
+  for (const match of content.matchAll(TEST_TITLE)) {
+    const title = (match[2] ?? match[3]).replace(/\\(.)/g, '$1');
+    const start = match.index + match[0].length;
+    const end = endOfCall(content, start);
+    const body = end === null ? null : content.slice(start, end).replace(/\s+/g, '');
+    bodies.set(title, [...(bodies.get(title) ?? []), body]);
+  }
+  return bodies;
+}
+
+const sameBodies = (one, other) => one.length === other.length && [...one].sort().join('\0') === [...other].sort().join('\0');
+
+/**
+ * Compares an existing test file with its new version, from the code alone. Lists the tests that
+ * are in both versions with different code. A test whose end cannot be found is left out,
+ * because this goes into a warning, and a false alarm is worse than a gap.
+ */
+export function compareTestFile({ before, after }) {
+  const was = testBodies(before);
+  const changedTests = [];
+  for (const [title, bodies] of testBodies(after)) {
+    const earlier = was.get(title);
+    if (!earlier || [...earlier, ...bodies].includes(null)) continue;
+    if (!sameBodies(earlier, bodies)) changedTests.push(title);
+  }
+  return {
+    added_lines: addedLines(before, after).length,
+    removed_lines: addedLines(after, before).length,
+    changed_tests: changedTests,
+  };
+}
+
 /**
  * Checks one changed test or test support file.
  * @param {{ path: string, before: string | null, after: string, isTest: boolean }} file

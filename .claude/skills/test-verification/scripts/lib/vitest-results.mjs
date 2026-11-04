@@ -1,7 +1,7 @@
 import { relative, sep } from 'node:path';
 import { sanitizeFailureMessage } from './sanitize-log.mjs';
 
-const LOAD_FAILURE = '(the file failed to load)';
+export const LOAD_FAILURE = '(the file failed to load)';
 
 /** Reduces a Vitest JSON report to the test ids that passed and failed. */
 export function summarizeReport(report, repo) {

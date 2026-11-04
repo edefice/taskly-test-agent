@@ -11,6 +11,7 @@ import { readFileSync, realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { clean } from '../../test-verification/scripts/lib/sanitize-log.mjs';
+import { claimMismatches } from './claim-check.mjs';
 
 export const REPORT_MARKER = '<!-- unit-test-agent-report -->';
 export const SOURCE_NOTE = 'Test descriptions and possible bugs are reported by the agent and not verified. Test results, coverage and the check result come from the gate.';
@@ -122,8 +123,9 @@ const checkLabel = (passed) => (passed ? 'passed' : '**failed**');
 function testResultRows(packages) {
   const rows = [];
   for (const [name, entry] of Object.entries(packages)) {
+    const zone = entry.new_tests?.second_time_zone?.ran ? `, also in ${safeCode(entry.new_tests.second_time_zone.zone)}` : '';
     const newTests = entry.new_tests
-      ? `${entry.new_tests.total} tests, ${entry.new_tests.runs} runs: ${checkLabel(entry.new_tests.passed)}`
+      ? `${entry.new_tests.total} tests, ${entry.new_tests.runs} runs${zone}: ${checkLabel(entry.new_tests.passed)}`
       : 'none';
     const full = entry.full_package ? `${entry.full_package.total} tests: ${checkLabel(entry.full_package.passed)}` : 'not run';
     const typecheck = entry.typecheck ? checkLabel(entry.typecheck.passed) : 'not run';
@@ -134,19 +136,45 @@ function testResultRows(packages) {
 
 const percent = (metric) => (Number.isFinite(metric?.pct) ? `${metric.pct}%` : 'n/a');
 
+const COVERAGE_METRICS = ['lines', 'branches', 'functions', 'statements'];
+
+// Lines alone can hide a gap: 100% of lines once went with 83% of functions, because the
+// functions that never ran shared a line with code that did.
+const coverageCells = ({ before, after }) => COVERAGE_METRICS.map((metric) => `${percent(before?.[metric])} → ${percent(after?.[metric])}`).join(' | ');
+
 function coverageRows(packages) {
   const rows = [];
   for (const [name, entry] of Object.entries(packages)) {
     const total = entry.coverage?.total;
     if (!total) continue;
-    rows.push(`| ${safeCode(`${name} (package)`)} | ${percent(total.before?.lines)} | ${percent(total.after?.lines)} | ${percent(total.before?.branches)} | ${percent(total.after?.branches)} | |`);
+    rows.push(`| ${safeCode(`${name} (package)`)} | ${coverageCells(total)} | |`);
     for (const file of entry.coverage.files ?? []) {
       const changed = file.changed_lines ? `${file.changed_lines.covered}/${file.changed_lines.total}` : 'n/a';
-      rows.push(`| ${safeCode(file.path)} | ${percent(file.before?.lines)} | ${percent(file.after?.lines)} | ${percent(file.before?.branches)} | ${percent(file.after?.branches)} | ${changed} |`);
+      rows.push(`| ${safeCode(file.path)} | ${coverageCells(file)} | ${changed} |`);
     }
   }
   if (rows.length === 0) return [];
-  return ['| | Lines before | Lines after | Branches before | Branches after | Changed lines covered |', '|---|---|---|---|---|---|', ...rows.slice(0, MAX_LIST_ITEMS * 2)];
+  return ['| | Lines | Branches | Functions | Statements | Changed lines covered |', '|---|---|---|---|---|---|', ...rows.slice(0, MAX_LIST_ITEMS * 2)];
+}
+
+/** Files the new tests left exactly where they were. A file already at 100% cannot grow. */
+function flatCoverageFiles(packages) {
+  const files = Object.values(packages).flatMap((entry) => entry.coverage?.files ?? []);
+  return files.filter(({ before, after }) => {
+    if (!before || !after) return false;
+    const numbers = COVERAGE_METRICS.map((metric) => [before[metric]?.pct, after[metric]?.pct]);
+    return numbers.every(([was, is]) => Number.isFinite(was) && was === is) && numbers.some(([, is]) => is < 100);
+  });
+}
+
+/** Comes from the diff, so it holds whatever the agent says. The agent's reason is shown as its own words. */
+function modifiedFileLines(verification, result) {
+  const reasons = new Map((result?.existing_tests_changed ?? []).map(({ path, justification }) => [path, justification]));
+  return limited(verification?.modified_test_files ?? [], ({ path, added_lines: added, removed_lines: removed, changed_tests: changedTests }) => {
+    const tests = changedTests.length > 0 ? ` Existing tests changed: ${changedTests.slice(0, 10).map((title) => safeCode(title)).join(', ')}${changedTests.length > 10 ? `, and ${changedTests.length - 10} more` : ''}.` : ' No existing test changed.';
+    const reason = reasons.has(path) ? ` The agent says: ${safeText(reasons.get(path), 300)}` : '';
+    return `- ${safeCode(path)}: +${added} and -${removed} lines.${tests}${reason}`;
+  });
 }
 
 function gateFailures(failures) {
@@ -244,10 +272,23 @@ export function renderReport(input) {
       limited(result?.suspected_bugs ?? [], ({ file, expected, actual }) => `- ${safeCode(file)}: expected ${safeText(expected, 300)}, actual ${safeText(actual, 300)}`),
     ),
   );
+  lines.push(...section('Existing test files modified', modifiedFileLines(verification, result)));
+  lines.push(
+    ...section(
+      'The agent and the diff disagree',
+      limited(claimMismatches(result, verification), ({ path, kind, tests }) => {
+        const names = tests.slice(0, 10).map((title) => safeCode(title)).join(', ');
+        const claim = kind === 'claims_unchanged' ? 'The agent says existing tests are unchanged' : 'The agent does not mention this change';
+        return `- ${safeCode(path)}: ${claim}, but the diff shows changes to ${names}. This is a warning and does not block the pull request.`;
+      }),
+    ),
+  );
+  // A run with no gate report has no diff to show, so the agent's own words are all there is.
+  const known = new Set((verification?.modified_test_files ?? []).map(({ path }) => path));
   lines.push(
     ...section(
       'Existing tests changed',
-      limited(result?.existing_tests_changed ?? [], ({ path, justification }) => `- ${safeCode(path)}: ${safeText(justification, 300)}`),
+      limited((result?.existing_tests_changed ?? []).filter(({ path }) => !known.has(path)), ({ path, justification }) => `- ${safeCode(path)}: ${safeText(justification, 300)}`),
     ),
   );
   lines.push(
@@ -258,6 +299,9 @@ export function renderReport(input) {
   );
   lines.push(...section('Test results', testResultRows(packages)));
   lines.push(...section('Coverage', coverageRows(packages)));
+  if (input.outcome === 'tests_added') {
+    lines.push(...section('Coverage did not grow', limited(flatCoverageFiles(packages), ({ path }) => `- ${safeCode(path)}: the new tests did not raise its coverage. This is a warning and does not block the pull request.`)));
+  }
   lines.push(...section('Mutation check', mutationLines(input.mutation)));
 
   const baselineRed = [
