@@ -28,6 +28,7 @@ export const OUTCOMES = [
   'agent_failed',
   'stale',
   'commit_unknown',
+  'commit_refused',
   'fork',
 ];
 
@@ -71,6 +72,9 @@ export function conclusionFor(input) {
 const countTests = (count) => `${count} ${count === 1 ? 'test' : 'tests'}`;
 
 function headline(input) {
+  // A red check must say why first, whatever the agent decided.
+  const regressions = input.regression_check?.regressions?.length ?? 0;
+  if (regressions > 0) return `${regressions} existing ${regressions === 1 ? 'test fails' : 'tests fail'} on this pull request`;
   const tests = countTests(input.result?.tests?.length ?? 0);
   switch (input.outcome) {
     case 'tests_added':
@@ -78,6 +82,7 @@ function headline(input) {
     case 'no_tests_needed':
       return 'No tests needed';
     case 'skipped':
+      if (input.analysis?.decision?.reason_code === 'label') return 'Skipped by the skip-test-agent label';
       return input.analysis?.decision?.reason_code === 'too_large' ? 'Skipped: this change is too large' : 'No tests needed';
     case 'tests_rejected':
       return 'Tests rejected by the gate, nothing was committed';
@@ -87,6 +92,8 @@ function headline(input) {
       return 'Result discarded: a newer commit arrived';
     case 'commit_unknown':
       return 'Tests accepted, but the commit step left no result';
+    case 'commit_refused':
+      return 'Tests accepted by the gate, but the commit step refused them';
     case 'fork':
       return 'Skipped: pull requests from forks do not run the agent';
     default:
@@ -110,6 +117,8 @@ function explanation(input) {
     case 'commit_unknown':
       // The commit may have landed and only its record may be lost, so this claims neither.
       return 'The commit step left no result. Check the branch history to see whether a commit was made. This does not block the pull request.';
+    case 'commit_refused':
+      return `Nothing was committed: ${safeText(input.commit_reason ?? 'no reason given', 300)} This does not block the pull request.`;
     case 'fork':
       return 'The agent needs a secret, and GitHub does not expose secrets to forks. Regular CI still runs.';
     default:
@@ -290,6 +299,7 @@ export function renderReport(input) {
     );
   }
   lines.push(...section('Instruction files removed before the agent ran', limited(Array.isArray(input.removed_instruction_files) ? input.removed_instruction_files : [], (path) => `- ${safeCode(path)}: came with this pull request and could have steered the agent, so it never saw this file.`)));
+  lines.push(...section('What the agent says about failing tests (not verified)', limited(Array.isArray(result?.regressions) ? result.regressions : [], ({ test, explanation }) => `- ${safeCode(test)}: ${safeText(explanation, 300)}`)));
   lines.push(...section('Gate failures', gateFailures(verification?.failures ?? [])));
   lines.push(...section('New tests', limited(result?.tests ?? [], ({ file, name, behavior }) => `- ${safeCode(file)} ${safeCode(name)}: ${safeText(behavior, 300)}`)));
   lines.push(

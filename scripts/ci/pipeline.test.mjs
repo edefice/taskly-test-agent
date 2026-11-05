@@ -626,8 +626,16 @@ describe('buildReportInput', () => {
 
   it('reports tests the commit step refused, with the reason', () => {
     const input = buildReportInput(state({ rounds: [added], commit: { committed: false, reason: 'The patch was refused.' } }));
-    assert.equal(input.outcome, 'tests_rejected');
-    assert.match(input.repair_note, /The patch was refused/);
+    assert.equal(input.outcome, 'commit_refused');
+    const { conclusion, title, markdown } = renderReport(input);
+    assert.equal(conclusion, 'neutral');
+    assert.equal(title, 'Tests accepted by the gate, but the commit step refused them');
+    assert.match(markdown, /Nothing was committed: The patch was refused\./);
+    assert.doesNotMatch(markdown, /rejected by the gate/);
+  });
+
+  it('still explains a refusal with no reason', () => {
+    assert.match(renderReport(buildReportInput(state({ rounds: [added], commit: { committed: false } }))).markdown, /no reason given/);
   });
 
   it('joins the removed instruction files of all attempts, and ignores what is not a list', () => {
