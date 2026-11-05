@@ -52,6 +52,9 @@ export function safeCode(value, limit = 200) {
   return `\`${shortened.replace(/`/g, "'").replace(/\|/g, '\\|').replace(/<!--/g, '< !--')}\``;
 }
 
+/** A count from the gate. That job ran code from the branch, so a count can be any text. */
+const count = (value) => (Number.isFinite(value) ? value : 'n/a');
+
 /** Only the link to a run of this kind may become a link. Anything else is dropped. */
 export function safeRunUrl(value) {
   return typeof value === 'string' && RUN_URL.test(value) ? value : null;
@@ -95,7 +98,7 @@ function explanation(input) {
   switch (input.outcome) {
     case 'tests_added':
     case 'no_tests_needed':
-      return safeText(input.result?.reasoning, 1000);
+      return `**Agent's summary (not verified):** ${safeText(input.result?.reasoning, 1000)}`;
     case 'skipped':
       return safeText(input.analysis?.decision?.reason, 500);
     case 'agent_failed':
@@ -131,9 +134,9 @@ function testResultRows(packages) {
   for (const [name, entry] of Object.entries(packages)) {
     const zone = entry.new_tests?.second_time_zone?.ran ? `, also in ${safeCode(entry.new_tests.second_time_zone.zone)}` : '';
     const newTests = entry.new_tests
-      ? `${entry.new_tests.total} tests, ${entry.new_tests.runs} runs${zone}: ${checkLabel(entry.new_tests.passed)}`
+      ? `${count(entry.new_tests.total)} tests, ${count(entry.new_tests.runs)} runs${zone}: ${checkLabel(entry.new_tests.passed)}`
       : 'none';
-    const full = entry.full_package ? `${entry.full_package.total} tests: ${checkLabel(entry.full_package.passed)}` : 'not run';
+    const full = entry.full_package ? `${count(entry.full_package.total)} tests: ${checkLabel(entry.full_package.passed)}` : 'not run';
     const typecheck = entry.typecheck ? checkLabel(entry.typecheck.passed) : 'not run';
     rows.push(`| ${safeCode(name)} | ${newTests} | ${full} | ${typecheck} |`);
   }
@@ -155,7 +158,7 @@ function coverageRows(packages) {
     if (!total) continue;
     rows.push(`| ${safeCode(`${name} (package)`)} | ${coverageCells(total)} | |`);
     for (const file of entry.coverage.files ?? []) {
-      const changed = file.changed_lines ? `${file.changed_lines.covered}/${file.changed_lines.total}` : 'n/a';
+      const changed = file.changed_lines ? `${count(file.changed_lines.covered)}/${count(file.changed_lines.total)}` : 'n/a';
       rows.push(`| ${safeCode(file.path)} | ${coverageCells(file)} | ${changed} |`);
     }
   }
@@ -179,7 +182,7 @@ function modifiedFileLines(verification, result) {
   return limited(verification?.modified_test_files ?? [], ({ path, added_lines: added, removed_lines: removed, changed_tests: changedTests }) => {
     const tests = changedTests.length > 0 ? ` Existing tests changed: ${changedTests.slice(0, 10).map((title) => safeCode(title)).join(', ')}${changedTests.length > 10 ? `, and ${changedTests.length - 10} more` : ''}.` : ' No existing test changed.';
     const reason = reasons.has(path) ? ` The agent says: ${safeText(reasons.get(path), 300)}` : '';
-    return `- ${safeCode(path)}: +${added} and -${removed} lines.${tests}${reason}`;
+    return `- ${safeCode(path)}: +${count(added)} and -${count(removed)} lines.${tests}${reason}`;
   });
 }
 
@@ -210,7 +213,7 @@ function mutationLines(mutation) {
   const packages = Object.entries(mutation.packages ?? {}).map(([name, entry]) => {
     if (MUTATION_NOT_RUN[entry.status]) return `- ${safeCode(name)} ${MUTATION_NOT_RUN[entry.status]}.`;
     const missed = entry.survived + entry.no_coverage;
-    return `- ${safeCode(name)}: ${entry.caught} of ${entry.total} changes to the code made a test fail, ${missed} did not.`;
+    return `- ${safeCode(name)}: ${count(entry.caught)} of ${count(entry.total)} changes to the code made a test fail, ${count(missed)} did not.`;
   });
   const skipped = mutation.skipped_paths ?? [];
   if (skipped.length > 0) packages.push(`- Not checked, because of unusual file names: ${skipped.slice(0, 5).map((path) => safeCode(path)).join(', ')}`);
@@ -222,6 +225,17 @@ function mutationLines(mutation) {
   if (dataOnly > 0) listed.push(`- ${dataOnly} more changed only text or data, see the run artifact`);
   const heading = behavior.length > 0 ? ['', 'No test noticed these changes to the code, so these behaviors may be unchecked. This is a warning and does not block the pull request:', ''] : [];
   return [...packages, ...heading, ...listed];
+}
+
+/** A fact from the gate, placed after the words of the agent, which may say it could not run tests. */
+function gateRunSentence(packages) {
+  const runs = Object.entries(packages)
+    .filter(([, entry]) => Number.isFinite(entry.new_tests?.runs))
+    .map(([name, entry]) => {
+      const zone = entry.new_tests.second_time_zone?.ran ? `, also in ${safeCode(entry.new_tests.second_time_zone.zone)}` : '';
+      return `${safeCode(name)} ${entry.new_tests.runs} ${entry.new_tests.runs === 1 ? 'run' : 'runs'}${zone}`;
+    });
+  return runs.length > 0 ? `The gate ran the changed test files itself: ${runs.join('; ')}.` : null;
 }
 
 function runFacts(input) {
@@ -264,6 +278,8 @@ export function renderReport(input) {
   const packages = verification?.packages ?? {};
   const regressions = regressionCheck?.regressions ?? [];
   const lines = [REPORT_MARKER, `### Unit test agent: ${title}`, '', explanation(input), ''];
+  const gateRuns = ['tests_added', 'no_tests_needed'].includes(input.outcome) ? gateRunSentence(packages) : null;
+  if (gateRuns) lines.push(gateRuns, '');
   if (input.repair_note) lines.push(safeText(input.repair_note, 400), '');
 
   if (regressions.length > 0) {
@@ -322,7 +338,7 @@ export function renderReport(input) {
 
   const skillList = (skills) => (skills?.length > 0 ? skills.map((skill) => safeCode(skill)).join(', ') : 'none');
   if (input.preloaded_skills || input.invoked_skills) {
-    lines.push(`Skills preloaded: ${skillList(input.preloaded_skills)}. Skills invoked: ${skillList(input.invoked_skills)}.`, '');
+    lines.push(`Skills preloaded: ${skillList(input.preloaded_skills)}. Skills loaded on demand: ${skillList(input.invoked_skills)}.`, '');
   }
   if (result) lines.push(SOURCE_NOTE, '');
   lines.push(`<sub>${runFacts(input)}</sub>`, '');
