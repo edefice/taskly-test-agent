@@ -18,6 +18,6 @@ export function summarizeTodos(todos: Todo[], today: string): TodoSummary {
     completed,
     active: total - completed,
     overdue,
-    percent_complete: total === 0 ? 0 : Math.round((completed / total) * 100),
+    percent_complete: total === 0 ? 0 : Math.floor((completed / total) * 100),
   };
 }
