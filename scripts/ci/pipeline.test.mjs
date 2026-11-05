@@ -106,6 +106,7 @@ describe('shellQuote and actionClaudeArgs', () => {
     for (const expected of ["'--agent' 'unit-test-agent'", `'--max-budget-usd' '${MAX_BUDGET_USD}'`, "'--json-schema'", "'--disallowedTools' 'Bash'", "'--setting-sources' 'project'", "'--settings' '/repo/.claude/agent-run.settings.json'"]) {
       assert.ok(args.includes(expected), expected);
     }
+    assert.match(args, /'--include-hook-events'/, 'the transcript has to show the hook firing');
     assert.match(args, /'--tools' 'Read,Grep,Glob,Edit,Write,Skill,StructuredOutput'/);
     assert.match(args, /'--allowedTools' 'Edit,Write'/);
   });
