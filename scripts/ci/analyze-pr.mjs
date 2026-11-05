@@ -8,10 +8,10 @@
 // packages.
 
 import { execFileSync } from 'node:child_process';
-import { readFileSync, realpathSync } from 'node:fs';
+import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { analyzeChanges } from '../../.claude/skills/pr-change-analysis/scripts/analyze-changes.mjs';
+import { analyzeChanges, readSourceDiff } from '../../.claude/skills/pr-change-analysis/scripts/analyze-changes.mjs';
 import { requireEnv, setOutputs, writeJson } from './lib/github.mjs';
 
 export const SKIP_LABEL = 'skip-test-agent';
@@ -49,6 +49,14 @@ function main(env = process.env) {
   if (guard.run) {
     analysis = analyzeChanges({ cwd: repo, base: pullRequest.base.sha, head: headSha });
     if (!analysis.decision.needs_agent) guard = { run: false, report: true, outcome: 'skipped' };
+    else {
+      const { text, chars, omitted } = readSourceDiff({ cwd: repo, analysis });
+      analysis.source_diff = { chars, omitted };
+      if (text !== null) {
+        mkdirSync(out, { recursive: true });
+        writeFileSync(join(out, 'source.diff'), text);
+      }
+    }
   } else if (guard.outcome === 'skipped') {
     analysis = { decision: { needs_agent: false, reason_code: 'label', reason: guard.reason } };
   }

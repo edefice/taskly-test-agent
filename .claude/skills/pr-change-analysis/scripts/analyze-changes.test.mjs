@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, before, beforeEach, describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { analyzeChanges, areaOf, classifyKind, parseNumstat, parseRaw, testCandidates } from './analyze-changes.mjs';
+import { analyzeChanges, areaOf, classifyKind, parseNumstat, parseRaw, readSourceDiff, testCandidates } from './analyze-changes.mjs';
 
 const SCRIPT = fileURLToPath(new URL('./analyze-changes.mjs', import.meta.url));
 
@@ -153,6 +153,74 @@ describe('analyzeChanges', () => {
     write('frontend/src/lib/http.ts', 'export const http = 1;\n');
     commitAll('base');
     run('switch', '-q', '-c', 'feature');
+  });
+
+  describe('readSourceDiff', () => {
+    const SOURCE = 'backend/src/features/todos/router.ts';
+    const diffNow = (options = {}) => readSourceDiff({ cwd: repo, analysis: analyze(), ...options });
+
+    it('gives the text of the change in source files, from the commits and not the working tree', () => {
+      write(SOURCE, 'export const router = 2;\n');
+      commitAll();
+      write(SOURCE, 'export const router = 3;\n');
+      const { text, omitted, chars } = diffNow();
+      assert.match(text, /^-export const router = 1;$/m);
+      assert.match(text, /^\+export const router = 2;$/m);
+      assert.doesNotMatch(text, /router = 3/);
+      assert.equal(omitted, false);
+      assert.equal(chars, text.length);
+    });
+
+    it('holds only source files', () => {
+      write(SOURCE, 'export const router = 2;\n');
+      write('README.md', '# Changed readme\n');
+      write('backend/tests/router.test.ts', "it('changed', () => {});\n");
+      commitAll();
+      const { text } = diffNow();
+      assert.match(text, /router = 2/);
+      assert.doesNotMatch(text, /Changed readme|'changed'/);
+    });
+
+    it('still shows a file that .gitattributes in the branch marks as binary', () => {
+      write(SOURCE, 'export const router = 2;\n');
+      write('.gitattributes', 'backend/src/** -diff\n');
+      commitAll();
+      const analysis = { source_files: [SOURCE], merge_base: run('merge-base', 'main', 'HEAD').trim(), head: run('rev-parse', 'HEAD').trim() };
+      assert.match(readSourceDiff({ cwd: repo, analysis }).text, /^\+export const router = 2;$/m);
+    });
+
+    it('takes a file name with special characters as a literal path', () => {
+      const name = 'backend/src/features/todos/*.ts';
+      write(name, 'export const a = 1;\n');
+      write(SOURCE, 'export const router = 2;\n');
+      commitAll();
+      const { text } = readSourceDiff({ cwd: repo, analysis: { source_files: [name], merge_base: run('merge-base', 'main', 'HEAD').trim(), head: run('rev-parse', 'HEAD').trim() } });
+      assert.match(text, /export const a = 1/);
+      assert.doesNotMatch(text, /router = 2/);
+    });
+
+    it('leaves the text out above the limit, and says how large it was', () => {
+      write(SOURCE, `export const router = '${'x'.repeat(500)}';\n`);
+      commitAll();
+      const { text, chars, omitted } = diffNow({ limit: 100 });
+      assert.equal(text, null);
+      assert.equal(omitted, true);
+      assert.ok(chars > 500);
+    });
+
+    it('keeps a text of exactly the limit', () => {
+      write(SOURCE, 'export const router = 2;\n');
+      commitAll();
+      const { chars } = diffNow();
+      assert.equal(diffNow({ limit: chars }).omitted, false);
+      assert.equal(diffNow({ limit: chars - 1 }).omitted, true);
+    });
+
+    it('gives nothing when no source file changed', () => {
+      write('README.md', '# Changed\n');
+      commitAll();
+      assert.deepEqual(diffNow(), { text: null, chars: 0, omitted: false });
+    });
   });
 
   it('reports no changes on an empty diff', () => {

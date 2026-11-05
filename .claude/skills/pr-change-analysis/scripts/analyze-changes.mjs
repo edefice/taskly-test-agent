@@ -285,6 +285,20 @@ export function analyzeChanges({ cwd, base, head = 'HEAD', limits = DEFAULT_LIMI
   };
 }
 
+// Above this the prompt gets only the list of files. An action input has a limit too.
+export const MAX_SOURCE_DIFF_CHARS = 40000;
+
+/**
+ * The diff of the source files, from git objects, as the analysis is. --text keeps a
+ * .gitattributes in the branch from hiding a file as binary.
+ * @returns {{ text: string | null, chars: number, omitted: boolean }}
+ */
+export function readSourceDiff({ cwd, analysis, limit = MAX_SOURCE_DIFF_CHARS }) {
+  if (analysis.source_files.length === 0) return { text: null, chars: 0, omitted: false };
+  const text = git(cwd, ['--literal-pathspecs', 'diff', ...DIFF_FLAGS, '--text', '--unified=3', '-M', `${analysis.merge_base}..${analysis.head}`, '--', ...analysis.source_files]);
+  return text.length > limit ? { text: null, chars: text.length, omitted: true } : { text, chars: text.length, omitted: false };
+}
+
 function main() {
   const { values } = parseArgs({
     options: {
