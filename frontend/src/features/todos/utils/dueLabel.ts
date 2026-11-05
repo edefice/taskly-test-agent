@@ -8,6 +8,7 @@ function dayNumber(date: string): number {
 export function dueLabel(dueDate: string | null, today: string): string {
   if (dueDate === null) return 'No due date'
   const days = dayNumber(dueDate) - dayNumber(today)
+  if (Number.isNaN(days)) return 'Invalid due date'
   if (days === 0) return 'Due today'
   if (days === 1) return 'Due tomorrow'
   if (days === -1) return 'Overdue by 1 day'
