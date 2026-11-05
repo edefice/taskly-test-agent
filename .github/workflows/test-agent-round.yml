@@ -79,6 +79,10 @@ jobs:
           ROUND: ${{ inputs.round }}
           ARTIFACTS: ${{ runner.temp }}/artifacts
         run: node "$TOOLS/scripts/ci/prepare-agent.mjs"
+      # Claude Code reads these as instructions, and the action restores only the ones in the root.
+      # A failure here must stop the agent, so this step tolerates nothing.
+      - name: Remove instruction files that came with the pull request
+        run: node "$TOOLS/scripts/ci/remove-instruction-files.mjs"
       - name: Run the agent
         id: agent
         # A failure of the agent is a result for the report, and must not end the job.

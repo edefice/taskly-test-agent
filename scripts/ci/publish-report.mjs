@@ -49,6 +49,7 @@ export function buildReportInput({ guard, analysis, regressionCheck, rounds, com
     usage,
     preloaded_skills: preloadedSkills,
     invoked_skills: [...new Set(records.flatMap(({ invoked_skills: skills }) => skills ?? []))],
+    removed_instruction_files: [...new Set(records.flatMap(({ removed_instruction_files: files }) => (Array.isArray(files) ? files : [])))],
     repair_rounds: Math.max(records.length - 1, 0),
   };
   // Whatever the rounds say, nothing from this run may be used after the key turned up in its output.

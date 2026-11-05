@@ -61,6 +61,7 @@ export function runGateRound({ repo, round, analysis, baseline, agent, transcrip
     mutation_rounds: mutationRounds,
     usage: { model: transcript.model, turns: transcript.turns, cost_usd: transcript.costUsd, blocked_calls: transcript.denials },
     invoked_skills: transcript.skills,
+    removed_instruction_files: agent.removed_instruction_files ?? [],
     outcome: null,
     accepted: false,
     next: '',

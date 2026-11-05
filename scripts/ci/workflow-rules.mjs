@@ -199,5 +199,15 @@ export function checkSecretIsolation(files, roundFile = 'test-agent-round.yml') 
     if (/secrets\./.test(upload.text)) errors.push(`${roundFile}: an upload holds the key.`);
   }
   if (scan && action && order(scan) < order(action)) errors.push(`${roundFile}: the scan runs before the action.`);
+
+  // Instruction files from the pull request must be gone before the model can read them, whatever it would do with them.
+  const removals = agent.steps.filter((step) => step.run?.some((line) => line.includes('remove-instruction-files.mjs')));
+  if (removals.length !== 1) errors.push(`${roundFile}: job ${agent.name} must remove instruction files in exactly one step, and it does in ${removals.length}.`);
+  for (const removal of removals) {
+    if (action && order(removal) > order(action)) errors.push(`${roundFile}: instruction files are removed after the action started.`);
+    const lastCheckout = agent.steps.findLastIndex((step) => step.uses?.startsWith('actions/checkout@'));
+    if (order(removal) < lastCheckout) errors.push(`${roundFile}: instruction files are removed before the last checkout, which can bring them back.`);
+    if (removal.continueOnError !== undefined || fieldOf(removal.lines, 8, 'if') !== undefined) errors.push(`${roundFile}: the removal of instruction files must always run, and its failure must stop the agent.`);
+  }
   return errors;
 }

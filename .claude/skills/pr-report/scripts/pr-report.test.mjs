@@ -501,6 +501,29 @@ describe('renderReport', () => {
     assert.doesNotMatch(markdown({ usage: { blocked_calls: 0 } }), /blocked tool calls/);
   });
 
+  describe('instruction files removed before the agent ran', () => {
+    it('gives the count, also when it is zero, because zero shows the check ran', () => {
+      assert.match(markdown({ removed_instruction_files: [] }), /0 instruction files removed/);
+      assert.doesNotMatch(markdown({ removed_instruction_files: [] }), /#### Instruction files/);
+    });
+
+    it('lists the files and uses the singular for one', () => {
+      const text = markdown({ removed_instruction_files: ['frontend/CLAUDE.md'] });
+      assert.match(text, /1 instruction file removed/);
+      assert.match(text, /#### Instruction files removed before the agent ran\n\n- `frontend\/CLAUDE\.md`: came with this pull request/);
+    });
+
+    it('says nothing when the run does not know', () => {
+      assert.doesNotMatch(markdown(), /instruction file/i);
+      assert.doesNotMatch(markdown({ removed_instruction_files: '[x](https://evil)' }), /instruction file|evil/i);
+    });
+
+    it('treats a name as untrusted text', () => {
+      const text = markdown({ removed_instruction_files: ['a`b<img src=x>/CLAUDE.md'] });
+      assert.match(text, /`a'b<img src=x>\/CLAUDE\.md`/);
+    });
+  });
+
   it('explains a deliberate decision to write no tests', () => {
     const report = renderReport(input({ outcome: 'no_tests_needed', result: noTests({ reasoning: 'Only a comment changed.' }), verification: undefined, commit_sha: undefined }));
     assert.match(report.markdown, /No tests needed/);

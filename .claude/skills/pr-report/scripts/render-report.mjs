@@ -251,6 +251,7 @@ function runFacts(input) {
   if (Number.isFinite(input.usage?.turns)) facts.push(`${input.usage.turns} turns`);
   if (Number.isFinite(input.usage?.cost_usd)) facts.push(`$${input.usage.cost_usd.toFixed(4)}`);
   // A blocked call can be an honest mistake or the sign of an injection attempt.
+  if (Array.isArray(input.removed_instruction_files)) facts.push(`${input.removed_instruction_files.length} instruction ${input.removed_instruction_files.length === 1 ? 'file' : 'files'} removed`);
   if (input.usage?.blocked_calls > 0) facts.push(`${input.usage.blocked_calls} blocked tool ${input.usage.blocked_calls === 1 ? 'call' : 'calls'}`);
   return facts.join(' · ');
 }
@@ -264,6 +265,7 @@ function runFacts(input) {
  * @param {object} [input.verification] Output of verify-tests.
  * @param {string[]} [input.preloaded_skills] Skills that code placed in the prompt.
  * @param {string[]} [input.invoked_skills] Skills the transcript shows the agent calling.
+ * @param {string[]} [input.removed_instruction_files] Instruction files taken away before the agent ran.
  * @param {{ regressions: string[], baseline_red?: string[] }} [input.regression_check]
  * @param {{ model?: string, turns?: number, cost_usd?: number, blocked_calls?: number }} [input.usage]
  * @param {object} [input.mutation] Output of mutate-changed-lines. A warning, never part of the conclusion.
@@ -287,6 +289,7 @@ export function renderReport(input) {
       ...section('Regression: existing tests pass on the base commit and fail on this commit', limited(regressions, (id) => `- ${safeCode(id)}`)),
     );
   }
+  lines.push(...section('Instruction files removed before the agent ran', limited(Array.isArray(input.removed_instruction_files) ? input.removed_instruction_files : [], (path) => `- ${safeCode(path)}: came with this pull request and could have steered the agent, so it never saw this file.`)));
   lines.push(...section('Gate failures', gateFailures(verification?.failures ?? [])));
   lines.push(...section('New tests', limited(result?.tests ?? [], ({ file, name, behavior }) => `- ${safeCode(file)} ${safeCode(name)}: ${safeText(behavior, 300)}`)));
   lines.push(
