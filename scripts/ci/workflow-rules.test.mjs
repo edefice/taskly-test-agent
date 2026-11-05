@@ -188,6 +188,36 @@ describe('checkWorkflow', () => {
     }
   });
 
+  describe('automatic caching in setup-node', () => {
+    const job = (head, withLines = ['node-version: 24']) => `permissions: {}\njobs:\n  a:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 1\n${head}    steps:\n      - uses: actions/setup-node@${SHA}\n        with:\n${withLines.map((line) => `          ${line}\n`).join('')}`;
+    const OFF = ['node-version: 24', 'package-manager-cache: false'];
+    const WRITES = (scope) => `    permissions:\n      ${scope}: write\n`;
+    const SECRET = '    env:\n      K: x\n    outputs:\n      s: ${{ secrets.K }}\n';
+
+    for (const [name, head] of [['contents', WRITES('contents')], ['pull requests', WRITES('pull-requests')], ['checks', WRITES('checks')]]) {
+      it(`rejects it in a job that can write ${name}`, () => {
+        assert.match(errorsOf(job(head)).join('\n'), /automatic caching is on/);
+      });
+
+      it(`accepts it turned off in a job that can write ${name}`, () => {
+        assert.deepEqual(errorsOf(job(head, OFF)), []);
+      });
+    }
+
+    it('rejects it on, written out, in a job that can write', () => {
+      assert.match(errorsOf(job(WRITES('contents'), ['package-manager-cache: true'])).join('\n'), /automatic caching is on/);
+    });
+
+    it('looks for a secret in the steps of a job too', () => {
+      const text = `permissions: {}\njobs:\n  a:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 1\n    steps:\n      - uses: actions/setup-node@${SHA}\n      - run: echo x\n        env:\n          K: \${{ secrets.K }}\n`;
+      assert.match(errorsOf(text).join('\n'), /automatic caching is on/);
+    });
+
+    it('leaves a job with no secret and no write access alone, because such a job can run code from the branch', () => {
+      assert.deepEqual(errorsOf(job('    permissions:\n      contents: read\n')), []);
+    });
+  });
+
   it('allows a checkout with credentials only in a job that writes', () => {
     const job = `jobs:\n  commit:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 1\n    permissions:\n      contents: write\n    steps:\n      - uses: actions/checkout@${SHA}\n`;
     assert.deepEqual(errorsOf(`permissions: {}\n${job}`), []);
@@ -282,6 +312,14 @@ describe('the workflows in this repository', () => {
     assert.equal(count('test-agent-round.yml'), 2);
     assert.equal(count('test-agent.yml'), 3, 'one passed value for each of the three rounds');
     assert.equal(count('ci.yml'), 0);
+  });
+
+  it('keep automatic caching off in the jobs of the agent, the commit and the report', () => {
+    const steps = (file, jobName) => parseWorkflow(realWorkflows()[file]).jobs.find(({ name }) => name === jobName).steps.filter(({ uses }) => uses?.startsWith('actions/setup-node@'));
+    for (const [file, jobName] of [['test-agent-round.yml', 'agent'], ['test-agent.yml', 'commit'], ['test-agent.yml', 'report']]) {
+      assert.equal(steps(file, jobName).length, 1, jobName);
+      assert.match(steps(file, jobName)[0].text, /package-manager-cache: false/, jobName);
+    }
   });
 
   it('run the agent only on pull requests into main, because the base commit chooses the tools', () => {
