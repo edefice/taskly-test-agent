@@ -177,13 +177,16 @@ function checkWritable(rawPath, cwd) {
 
 function checkGlobPattern(pattern) {
   if (typeof pattern !== 'string' || pattern === '') deny('The search has no valid pattern.');
-  if (
-    isAbsolute(pattern) ||
-    pattern.startsWith('~') ||
-    pattern.includes('$') ||
-    pattern.split(/[\\/]/).includes('..')
-  ) {
-    deny(`Pattern ${quoted(pattern)} reaches outside the repository.`);
+  // A tool may expand braces itself, so each alternative counts as a pattern of its own.
+  for (const option of expandBraces(pattern)) {
+    if (
+      isAbsolute(option) ||
+      option.startsWith('~') ||
+      option.includes('$') ||
+      option.split(/[\\/]/).includes('..')
+    ) {
+      deny(`Pattern ${quoted(pattern)} reaches outside the repository.`);
+    }
   }
   if (patternReachesUnreadable(pattern)) deny(`Pattern ${quoted(pattern)} can match a file that is not readable.`);
 }
