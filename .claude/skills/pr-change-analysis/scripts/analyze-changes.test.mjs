@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, before, beforeEach, describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { analyzeChanges, areaOf, classifyKind, parseNumstat, parseRaw, readSourceDiff, testCandidates } from './analyze-changes.mjs';
+import { analyzeChanges, areaOf, BOT_TRAILER, classifyKind, parseNumstat, parseRaw, readSourceDiff, testCandidates } from './analyze-changes.mjs';
 
 const SCRIPT = fileURLToPath(new URL('./analyze-changes.mjs', import.meta.url));
 
@@ -219,7 +219,99 @@ describe('analyzeChanges', () => {
     it('gives nothing when no source file changed', () => {
       write('README.md', '# Changed\n');
       commitAll();
-      assert.deepEqual(diffNow(), { text: null, chars: 0, omitted: false });
+      const { text, chars, omitted, files } = diffNow();
+      assert.deepEqual({ text, chars, omitted, files }, { text: null, chars: 0, omitted: false, files: [] });
+    });
+
+    describe('where it starts', () => {
+      const botCommit = () => commitAll(`test: add unit tests\n\nThe gate accepted these tests.\n\n${BOT_TRAILER} 42`);
+      const head = () => run('rev-parse', 'HEAD').trim();
+
+      it('starts at the merge base when the agent has no commit here, and says so', () => {
+        write(SOURCE, 'export const router = 2;\n');
+        commitAll();
+        const { base, base_kind: kind, files } = diffNow();
+        assert.equal(base, run('merge-base', 'main', 'HEAD').trim());
+        assert.equal(kind, 'merge_base');
+        assert.deepEqual(files, [SOURCE]);
+      });
+
+      it('starts at the commit of the agent, so a later change in a new file shows as a change', () => {
+        const added = 'backend/src/features/todos/summary.ts';
+        write(added, 'export const percent = Math.round(1);\n');
+        commitAll();
+        write('backend/tests/summary.test.ts', "it('works', () => {});\n");
+        botCommit();
+        const bot = head();
+        write(added, 'export const percent = Math.floor(1);\n');
+        commitAll();
+        const { text, base, base_kind: kind, files } = diffNow();
+        assert.equal(base, bot);
+        assert.equal(kind, 'bot_commit');
+        assert.deepEqual(files, [added]);
+        assert.match(text, /^-export const percent = Math\.round\(1\);$/m);
+        assert.match(text, /^\+export const percent = Math\.floor\(1\);$/m);
+        assert.doesNotMatch(text, /new file mode/);
+      });
+
+      it('leaves out source files that changed only before the commit of the agent', () => {
+        write(SOURCE, 'export const router = 2;\n');
+        write('frontend/src/lib/http.ts', 'export const http = 2;\n');
+        commitAll();
+        write('backend/tests/router.test.ts', "it('one', () => {});\n");
+        botCommit();
+        write('frontend/src/lib/http.ts', 'export const http = 3;\n');
+        commitAll();
+        const { text, files } = diffNow();
+        assert.deepEqual(files, ['frontend/src/lib/http.ts']);
+        assert.doesNotMatch(text, /router/);
+      });
+
+      it('uses the newest of several commits of the agent', () => {
+        write(SOURCE, 'export const router = 2;\n');
+        commitAll();
+        write('backend/tests/router.test.ts', "it('one', () => {});\n");
+        botCommit();
+        write(SOURCE, 'export const router = 3;\n');
+        commitAll();
+        write('backend/tests/router.test.ts', "it('two', () => {});\n");
+        botCommit();
+        const second = head();
+        write(SOURCE, 'export const router = 4;\n');
+        commitAll();
+        const { text, base } = diffNow();
+        assert.equal(base, second);
+        assert.match(text, /^-export const router = 3;$/m);
+      });
+
+      it('gives no diff, and says where it looked, when no source file changed after the commit of the agent', () => {
+        write(SOURCE, 'export const router = 2;\n');
+        commitAll();
+        write('backend/tests/router.test.ts', "it('one', () => {});\n");
+        botCommit();
+        const bot = head();
+        write('README.md', '# Changed\n');
+        commitAll();
+        const result = diffNow();
+        assert.deepEqual(result, { text: null, chars: 0, omitted: false, files: [], base: bot, base_kind: 'bot_commit' });
+      });
+
+      it('ignores a commit of the agent on the base branch, outside this pull request', () => {
+        run('switch', '-q', 'main');
+        write('backend/tests/router.test.ts', "it('merged', () => {});\n");
+        botCommit();
+        run('switch', '-q', 'feature');
+        run('rebase', '-q', 'main');
+        write(SOURCE, 'export const router = 2;\n');
+        commitAll();
+        assert.equal(diffNow().base_kind, 'merge_base');
+      });
+
+      it('does not count the marker in the middle of a line', () => {
+        write(SOURCE, 'export const router = 2;\n');
+        commitAll(`docs: explain ${BOT_TRAILER} 1`);
+        assert.equal(diffNow().base_kind, 'merge_base');
+      });
     });
   });
 
