@@ -19,6 +19,7 @@ vi.mock('./hooks/useUpdateTodoMutation', () => ({
 vi.mock('./components/TodosHeader', () => ({
   TodosHeader: () => <h1>Tasks</h1>,
 }))
+vi.mock('./components/TodoSummary', () => ({ TodoSummary: () => null }))
 vi.mock('./components/TodoFilters', () => ({ TodoFilters: () => null }))
 vi.mock('./components/TodoList', () => ({ TodoList: () => <p>Task list</p> }))
 vi.mock('./components/TodoEditor', () => ({ TodoEditor: () => null }))

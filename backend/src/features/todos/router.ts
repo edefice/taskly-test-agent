@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { summarizeTodos } from './summary.js';
 import type { TodoStore } from './types.js';
 import { createSchema, updateSchema, idSchema } from './validators.js';
 
@@ -15,6 +16,10 @@ export function createTodosRouter(repository: TodoStore) {
     const result = createSchema.safeParse(req.body);
     if (!result.success) return res.status(422).json({ detail: result.error.issues });
     res.status(201).json(await repository.create(result.data));
+  });
+  // Before /:id, which would take this path as an ID and refuse it.
+  router.get('/summary', async (req, res) => {
+    res.json(summarizeTodos(await repository.list(), new Date().toISOString().slice(0, 10)));
   });
   router.get('/:id', async (req, res) => {
     const todo = await repository.get(Number(res.locals.todoId));
