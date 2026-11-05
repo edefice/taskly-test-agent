@@ -31,6 +31,8 @@ jobs:
       - name: Build the prompt
         id: prompt
         run: node "$TOOLS/scripts/ci/build-agent-prompt.mjs"
+      - name: Remove instruction files
+        run: node "$TOOLS/scripts/ci/remove-instruction-files.mjs"
       - name: Run the agent
         id: agent
         uses: anthropics/claude-code-action@${SHA}
@@ -84,10 +86,10 @@ describe('parseWorkflow', () => {
   it('reads jobs and steps', () => {
     const { jobs } = parseWorkflow(ROUND);
     assert.deepEqual(jobs.map(({ name }) => name), ['agent', 'verify']);
-    assert.equal(jobs[0].steps.length, 6);
-    assert.equal(jobs[0].steps[3].uses, `anthropics/claude-code-action@${SHA}`);
-    assert.equal(jobs[0].steps[4].id, 'scan');
-    assert.deepEqual(jobs[0].steps[4].run, ['node "$TOOLS/scripts/ci/scan-secret.mjs" out']);
+    assert.equal(jobs[0].steps.length, 7);
+    assert.equal(jobs[0].steps[4].uses, `anthropics/claude-code-action@${SHA}`);
+    assert.equal(jobs[0].steps[5].id, 'scan');
+    assert.deepEqual(jobs[0].steps[5].run, ['node "$TOOLS/scripts/ci/scan-secret.mjs" out']);
   });
 
   it('reads a script of several lines', () => {
@@ -223,6 +225,25 @@ describe('checkSecretIsolation', () => {
     });
   }
 
+  describe('the removal of instruction files', () => {
+    const REMOVAL = '      - name: Remove instruction files\n        run: node "$TOOLS/scripts/ci/remove-instruction-files.mjs"\n';
+    const errorsWith = (round) => checkSecretIsolation(files(round)).join('\n');
+    const withoutRemoval = swap(ROUND, REMOVAL, '');
+
+    for (const [name, broken, expected] of [
+      ['no removal', withoutRemoval, /in exactly one step, and it does in 0/],
+      ['a removal in two steps', swap(ROUND, REMOVAL, `${REMOVAL}${REMOVAL}`), /in exactly one step, and it does in 2/],
+      ['a removal after the action', swap(withoutRemoval, '      - name: Scan the output for the key\n', `${REMOVAL}      - name: Scan the output for the key\n`), /after the action started/],
+      ['a removal before the last checkout', swap(withoutRemoval, `      - uses: actions/checkout@${SHA}\n        with:\n          persist-credentials: false\n      - name: Keep`, `${REMOVAL}      - uses: actions/checkout@${SHA}\n        with:\n          persist-credentials: false\n      - name: Keep`), /before the last checkout/],
+      ['a failure that does not stop the agent', swap(ROUND, '      - name: Remove instruction files\n', '      - name: Remove instruction files\n        continue-on-error: true\n'), /must always run/],
+      ['a removal that can be skipped', swap(ROUND, '      - name: Remove instruction files\n', "      - name: Remove instruction files\n        if: inputs.round == 0\n"), /must always run/],
+    ]) {
+      it(`rejects ${name}`, () => {
+        assert.match(errorsWith(broken), expected);
+      });
+    }
+  });
+
   it('rejects the key in a job of the caller that is not the call', () => {
     const caller = swap(CALLER, '      - run: echo done', '      - run: echo done\n        env:\n          K: ${{ secrets.ANTHROPIC_API_KEY }}');
     assert.match(errorsOf(ROUND, caller).join('\n'), /job report uses a secret and is not the call/);
@@ -245,6 +266,10 @@ describe('the workflows in this repository', () => {
     assert.equal(count('test-agent-round.yml'), 2);
     assert.equal(count('test-agent.yml'), 3, 'one passed value for each of the three rounds');
     assert.equal(count('ci.yml'), 0);
+  });
+
+  it('run the agent only on pull requests into main, because the base commit chooses the tools', () => {
+    assert.match(realWorkflows()['test-agent.yml'], /^on:\n {2}pull_request:\n(?: +#.*\n)* {4}branches: \[main\]\n/m);
   });
 
   it('give the gate the history it compares with', () => {

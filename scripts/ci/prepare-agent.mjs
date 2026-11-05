@@ -36,6 +36,8 @@ export function actionClaudeArgs(repo) {
     if (SET_BY_THE_ACTION.has(args[index])) index += 1;
     else if (!WITHOUT_VALUE.has(args[index])) kept.push(args[index]);
   }
+  // So that the transcript of a run shows the guard hook firing under the action.
+  kept.push('--include-hook-events');
   return kept.map(shellQuote).join(' ');
 }
 

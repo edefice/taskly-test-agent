@@ -536,6 +536,11 @@ describe('childEnv', () => {
     });
     assert.deepEqual(env, { PATH: '/bin', CI: 'true', TZ: 'UTC' });
   });
+
+  it('keeps the Job Summary away from the tests and the mutation runs, and only that', () => {
+    const env = childEnv({ GITHUB_STEP_SUMMARY: '/summary', GITHUB_ACTIONS: 'true', GITHUB_WORKSPACE: '/repo' });
+    assert.deepEqual(env, { GITHUB_ACTIONS: 'true', GITHUB_WORKSPACE: '/repo', CI: 'true', TZ: 'UTC' });
+  });
 });
 
 describe('command line', () => {

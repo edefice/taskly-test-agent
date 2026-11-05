@@ -14,10 +14,10 @@ import { collectPatch } from './lib/patch.mjs';
 
 export function collectAgentOutput({ repo, out, round, executionFile, agentOutcome }) {
   mkdirSync(out, { recursive: true });
-  const { paths, outside } = collectPatch(repo, join(out, 'agent.patch'));
+  const { paths, outside, removedInstructionFiles } = collectPatch(repo, join(out, 'agent.patch'));
   const hasTranscript = Boolean(executionFile) && existsSync(executionFile);
   if (hasTranscript) copyFileSync(executionFile, join(out, 'transcript.json'));
-  const agent = { round, action_outcome: agentOutcome || 'unknown', paths, outside, has_transcript: hasTranscript };
+  const agent = { round, action_outcome: agentOutcome || 'unknown', paths, outside, removed_instruction_files: removedInstructionFiles, has_transcript: hasTranscript };
   writeJson(join(out, 'agent.json'), agent);
   return agent;
 }

@@ -6,6 +6,7 @@
 import { spawnSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { classifyTestPath } from '../../../.claude/lib/test-paths.mjs';
+import { isInstructionFile } from './instruction-files.mjs';
 
 const REGULAR_FILE = '100644';
 // Claude Code Action restores these from the base branch, which can show as changes.
@@ -70,23 +71,26 @@ export function applyPatch(repo, patchFile) {
 
 function statusEntries(repo) {
   const output = git(repo, ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--no-renames']).stdout;
-  return output.split('\0').filter(Boolean).map((entry) => entry.slice(3));
+  return output.split('\0').filter(Boolean).map((entry) => ({ status: entry.slice(0, 2).trim(), path: entry.slice(3) }));
 }
 
 /**
  * Stages what the agent may have changed and writes it as a patch. A change anywhere else is
- * reported and left out, so the gate can refuse the attempt without ever running it.
- * @returns {{ paths: string[], outside: string[] }}
+ * reported and left out, so the gate can refuse the attempt without ever running it. Only a deleted
+ * instruction file is the work of remove-instruction-files. One that was written counts as outside.
+ * @returns {{ paths: string[], outside: string[], removedInstructionFiles: string[] }}
  */
 export function collectPatch(repo, patchFile) {
   const allowed = [];
   const outside = [];
-  for (const path of statusEntries(repo)) {
+  const removedInstructionFiles = [];
+  for (const { status, path } of statusEntries(repo)) {
     if (classifyTestPath(path) !== null) allowed.push(path);
+    else if (status === 'D' && isInstructionFile(path)) removedInstructionFiles.push(path);
     else if (!RESTORED_BY_THE_ACTION.some((pattern) => pattern.test(path))) outside.push(path);
   }
   if (allowed.length > 0) git(repo, ['add', '-A', '--', ...allowed]);
   const patch = git(repo, ['diff', '--cached', '--binary', '--no-ext-diff', '--no-textconv', '--no-color', '--full-index', 'HEAD', '--', ...(allowed.length > 0 ? allowed : ['.'])]).stdout;
   writeFileSync(patchFile, allowed.length > 0 ? patch : '');
-  return { paths: allowed, outside };
+  return { paths: allowed, outside, removedInstructionFiles };
 }

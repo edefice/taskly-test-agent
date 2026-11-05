@@ -169,7 +169,7 @@ describe('with real git', () => {
       write(TEST, 'new\n');
       write('backend/tests/b.test.ts', 'b\n');
       const file = out();
-      assert.deepEqual(collectPatch(repo, file), { paths: [TEST, 'backend/tests/b.test.ts'], outside: [] });
+      assert.deepEqual(collectPatch(repo, file), { paths: [TEST, 'backend/tests/b.test.ts'], outside: [], removedInstructionFiles: [] });
       run('reset', '--hard', '-q', 'HEAD');
       run('clean', '-fdq');
       assert.equal(applyPatch(repo, file).applied, true);
@@ -181,7 +181,7 @@ describe('with real git', () => {
       write('backend/src/a.ts', 'evil\n');
       write('backend/src/new.ts', 'evil\n');
       const file = out();
-      assert.deepEqual(collectPatch(repo, file), { paths: [TEST], outside: ['backend/src/a.ts', 'backend/src/new.ts'] });
+      assert.deepEqual(collectPatch(repo, file), { paths: [TEST], outside: ['backend/src/a.ts', 'backend/src/new.ts'], removedInstructionFiles: [] });
       const patch = readFileSync(file, 'utf8');
       assert.ok(patch.includes(TEST));
       assert.ok(!patch.includes('evil'));
@@ -202,14 +202,14 @@ describe('with real git', () => {
 
     it('writes an empty patch when nothing changed', () => {
       const file = out();
-      assert.deepEqual(collectPatch(repo, file), { paths: [], outside: [] });
+      assert.deepEqual(collectPatch(repo, file), { paths: [], outside: [], removedInstructionFiles: [] });
       assert.equal(readFileSync(file, 'utf8'), '');
     });
 
     it('writes an empty patch when only forbidden paths changed', () => {
       write('backend/src/a.ts', 'evil\n');
       const file = out();
-      assert.deepEqual(collectPatch(repo, file), { paths: [], outside: ['backend/src/a.ts'] });
+      assert.deepEqual(collectPatch(repo, file), { paths: [], outside: ['backend/src/a.ts'], removedInstructionFiles: [] });
       assert.equal(readFileSync(file, 'utf8'), '');
     });
 

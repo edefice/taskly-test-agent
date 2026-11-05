@@ -395,14 +395,62 @@ describe('renderReport', () => {
   it('shows what happened first', () => {
     const lines = markdown().split('\n');
     assert.equal(lines[1], '### Unit test agent: 1 test added to this pull request');
-    assert.equal(lines[3], 'The health route had no tests.');
+    assert.equal(lines[3], "**Agent's summary (not verified):** The health route had no tests.");
+  });
+
+  describe('the sentence from the gate after the words of the agent', () => {
+    const entry = (new_tests) => ({ backend: { new_tests } });
+    const sentence = (overrides) => renderReport(input(overrides)).markdown.split('\n').find((line) => line.startsWith('The gate ran'));
+
+    it('follows the summary, with the runs and the second time zone', () => {
+      const lines = renderReport(input({ verification: { failures: [], changed_files: [], shared_test_support: [], packages: entry({ total: 3, runs: 3, passed: true, second_time_zone: { ran: true, zone: 'Pacific/Auckland' } }) } })).markdown.split('\n');
+      assert.equal(lines[5], 'The gate ran the changed test files itself: `backend` 3 runs, also in `Pacific/Auckland`.');
+    });
+
+    it('names no zone when the second run did not happen, and counts one run', () => {
+      assert.equal(sentence({ verification: { failures: [], packages: entry({ runs: 1, passed: true, second_time_zone: { ran: false, zone: 'Pacific/Auckland' } }) } }), 'The gate ran the changed test files itself: `backend` 1 run.');
+    });
+
+    it('lists each package', () => {
+      assert.equal(sentence({ verification: { failures: [], packages: { backend: { new_tests: { runs: 3 } }, frontend: { new_tests: { runs: 2 } } } } }), 'The gate ran the changed test files itself: `backend` 3 runs; `frontend` 2 runs.');
+    });
+
+    for (const [name, overrides] of [
+      ['a package with no new tests', { verification: { failures: [], packages: { backend: {} } } }],
+      ['a count that is not a number', { verification: { failures: [], packages: entry({ runs: '[x](https://evil)' }) } }],
+      ['an outcome where the tests were rejected', { outcome: 'tests_rejected', verification: { failures: [], packages: entry({ runs: 3 }) } }],
+    ]) {
+      it(`says nothing for ${name}`, () => {
+        assert.equal(sentence(overrides), undefined);
+      });
+    }
+  });
+
+  it('shows only numbers where the gate gives counts, because that job ran code from the branch', () => {
+    const attack = '[Approve here](https://evil.example) @org/team <img src=x>';
+    const text = markdown({
+      verification: {
+        failures: [],
+        changed_files: [],
+        shared_test_support: [],
+        modified_test_files: [{ path: 'a.test.ts', added_lines: attack, removed_lines: attack, changed_tests: [] }],
+        packages: { backend: { new_tests: { total: attack, runs: attack, passed: true }, full_package: { total: attack, passed: true }, coverage: { total: {}, files: [{ path: 'a.ts', changed_lines: { covered: attack, total: attack } }] } } },
+      },
+      mutation: { status: 'completed', packages: { backend: { status: 'completed', caught: attack, total: attack, survived: attack, no_coverage: attack } }, mutants: [] },
+    });
+    assert.doesNotMatch(text, /evil\.example|@org|<img/);
+    assert.match(text, /n\/a tests, n\/a runs/);
+    assert.match(text, /n\/a tests: /);
+    assert.match(text, /n\/a\/n\/a/);
+    assert.match(text, /\+n\/a and -n\/a lines/);
+    assert.match(text, /n\/a of n\/a changes to the code made a test fail, n\/a did not/);
   });
 
   it('shows every required fact', () => {
     const text = markdown();
     for (const expected of [
       'The health route answers ok after a query succeeds.',
-      'Skills preloaded: `pr-change-analysis`. Skills invoked: `backend-unit-tests`.',
+      'Skills preloaded: `pr-change-analysis`. Skills loaded on demand: `backend-unit-tests`.',
       TEST_FILE,
       '50 tests: passed',
       '2 tests, 3 runs: passed',
@@ -444,13 +492,36 @@ describe('renderReport', () => {
   });
 
   it('shows both skill lists, also when a list is empty', () => {
-    assert.match(markdown({ invoked_skills: [] }), /Skills preloaded: `pr-change-analysis`\. Skills invoked: none\./);
+    assert.match(markdown({ invoked_skills: [] }), /Skills preloaded: `pr-change-analysis`\. Skills loaded on demand: none\./);
   });
 
   it('shows blocked tool calls, only when there are some', () => {
     assert.match(markdown({ usage: { blocked_calls: 3 } }), /3 blocked tool calls/);
     assert.match(markdown({ usage: { blocked_calls: 1 } }), /1 blocked tool call\b/);
     assert.doesNotMatch(markdown({ usage: { blocked_calls: 0 } }), /blocked tool calls/);
+  });
+
+  describe('instruction files removed before the agent ran', () => {
+    it('gives the count, also when it is zero, because zero shows the check ran', () => {
+      assert.match(markdown({ removed_instruction_files: [] }), /0 instruction files removed/);
+      assert.doesNotMatch(markdown({ removed_instruction_files: [] }), /#### Instruction files/);
+    });
+
+    it('lists the files and uses the singular for one', () => {
+      const text = markdown({ removed_instruction_files: ['frontend/CLAUDE.md'] });
+      assert.match(text, /1 instruction file removed/);
+      assert.match(text, /#### Instruction files removed before the agent ran\n\n- `frontend\/CLAUDE\.md`: came with this pull request/);
+    });
+
+    it('says nothing when the run does not know', () => {
+      assert.doesNotMatch(markdown(), /instruction file/i);
+      assert.doesNotMatch(markdown({ removed_instruction_files: '[x](https://evil)' }), /instruction file|evil/i);
+    });
+
+    it('treats a name as untrusted text', () => {
+      const text = markdown({ removed_instruction_files: ['a`b<img src=x>/CLAUDE.md'] });
+      assert.match(text, /`a'b<img src=x>\/CLAUDE\.md`/);
+    });
   });
 
   it('explains a deliberate decision to write no tests', () => {

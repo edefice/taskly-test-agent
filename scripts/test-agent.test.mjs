@@ -309,7 +309,7 @@ describe('runPipeline', () => {
     assert.deepEqual(calls.verify[0].sourceFiles, ['backend/src/a.ts']);
     const report = artifact('report.md');
     assert.match(report, /1 test written and verified/);
-    assert.match(report, /Skills preloaded: `pr-change-analysis`, `pr-report`, `backend-unit-tests`\. Skills invoked: `backend-unit-tests`\./);
+    assert.match(report, /Skills preloaded: `pr-change-analysis`, `pr-report`, `backend-unit-tests`\. Skills loaded on demand: `backend-unit-tests`\./);
     assert.match(report, /claude-sonnet-5-5/);
     assert.match(report, /7 turns/);
     assert.match(report, /\$0\.2500/);
@@ -376,7 +376,7 @@ describe('runPipeline', () => {
       runPipeline(options(), deps);
       assert.deepEqual(calls.claude, []);
       assert.deepEqual(inReport(), []);
-      assert.match(artifact('report.md'), /Skills preloaded: none\. Skills invoked: none\./);
+      assert.match(artifact('report.md'), /Skills preloaded: none\. Skills loaded on demand: none\./);
     });
 
     it('the report lists the transcript separately, so a skipped skill shows', () => {
