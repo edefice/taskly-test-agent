@@ -62,6 +62,12 @@ export function isOverdue(todo: Todo): boolean {
   return !todo.completed && !!todo.due_date && todo.due_date < localDate
 }
 
+export function summarizeOverdue(todos: Todo[]): string {
+  const count = todos.filter(isOverdue).length
+  if (count === 0) return 'Nothing is overdue.'
+  return count === 1 ? '1 task is overdue.' : `${count} tasks are overdue.`
+}
+
 export function formatDate(date: string): string {
   return new Intl.DateTimeFormat('en-GB', {
     day: 'numeric',

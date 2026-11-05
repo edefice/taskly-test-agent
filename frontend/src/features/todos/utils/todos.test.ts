@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { formatDate, isOverdue, selectTodos, validateTodo } from './todos'
+import {
+  formatDate,
+  isOverdue,
+  selectTodos,
+  summarizeOverdue,
+  validateTodo,
+} from './todos'
 import type { Todo, TodoInput } from '../types'
 
 const base: Todo = {
@@ -184,6 +190,36 @@ describe('isOverdue', () => {
     // 14 June 20:00 in Los Angeles, already 15 June in UTC
     vi.setSystemTime(new Date('2026-06-15T03:00:00Z'))
     expect(isOverdue({ ...base, due_date: '2026-06-14' })).toBe(false)
+  })
+})
+
+describe('summarizeOverdue', () => {
+  const overdue = (id: number): Todo => ({
+    ...base,
+    id,
+    due_date: '2026-06-14',
+  })
+
+  it('says nothing is overdue when no task is late', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(2026, 5, 15, 12))
+    expect(summarizeOverdue([base, { ...overdue(2), completed: true }])).toBe(
+      'Nothing is overdue.',
+    )
+  })
+
+  it('uses the singular for one overdue task', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(2026, 5, 15, 12))
+    expect(summarizeOverdue([base, overdue(2)])).toBe('1 task is overdue.')
+  })
+
+  it('counts several overdue tasks in the plural', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(2026, 5, 15, 12))
+    expect(summarizeOverdue([overdue(2), overdue(3), base])).toBe(
+      '2 tasks are overdue.',
+    )
   })
 })
 
