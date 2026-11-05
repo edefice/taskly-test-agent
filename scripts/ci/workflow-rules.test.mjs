@@ -314,6 +314,12 @@ describe('the workflows in this repository', () => {
     assert.equal(count('ci.yml'), 0);
   });
 
+  it('let a run for a commit of the bot wait, so that it cannot cancel a report, and let a push from a person replace a run', () => {
+    const header = parseWorkflow(realWorkflows()['test-agent.yml']).header.join('\n');
+    assert.match(header, /^concurrency:\n {2}group: test-agent-\$\{\{ github\.event\.pull_request\.number \}\}\n/m);
+    assert.match(header, /^ {2}cancel-in-progress: \$\{\{ github\.actor != 'github-actions\[bot\]' \}\}$/m);
+  });
+
   it('give the agent the baseline, always, and before the step that builds the prompt', () => {
     const { steps } = parseWorkflow(realWorkflows()['test-agent-round.yml']).jobs.find(({ name }) => name === 'agent');
     const download = steps.findIndex((step) => step.uses?.startsWith('actions/download-artifact@') && step.with.name === 'baseline');

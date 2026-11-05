@@ -18,7 +18,10 @@ permissions: {}
 
 concurrency:
   group: test-agent-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+  # A newer push from a person replaces a run. A run for a commit of the bot has nothing to check,
+  # so it waits, and does not cancel the run whose report is still to come. The actor stays the
+  # bot when a person approves such a run.
+  cancel-in-progress: ${{ github.actor != 'github-actions[bot]' }}
 
 jobs:
   analyze:
