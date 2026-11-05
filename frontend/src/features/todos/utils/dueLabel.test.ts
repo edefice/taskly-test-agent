@@ -27,6 +27,14 @@ it('counts days overdue in the plural', () => {
   expect(dueLabel('2026-06-10', today)).toBe('Overdue by 5 days')
 })
 
+it('says the due date is invalid when it cannot be parsed', () => {
+  expect(dueLabel('not-a-date', today)).toBe('Invalid due date')
+})
+
+it('says the due date is invalid when today cannot be parsed', () => {
+  expect(dueLabel('2026-06-15', 'garbage')).toBe('Invalid due date')
+})
+
 it('counts across month and leap-year boundaries', () => {
   expect(dueLabel('2028-03-01', '2028-02-28')).toBe('Due in 2 days')
   expect(dueLabel('2026-01-01', '2025-12-31')).toBe('Due tomorrow')
