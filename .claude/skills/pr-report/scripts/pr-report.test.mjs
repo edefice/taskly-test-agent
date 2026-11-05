@@ -326,6 +326,7 @@ describe('conclusionFor', () => {
     ['tests_rejected', 'neutral'],
     ['agent_failed', 'neutral'],
     ['stale', 'neutral'],
+    ['commit_unknown', 'neutral'],
     ['fork', 'neutral'],
   ]) {
     it(`${outcome} gives ${expected}`, () => {

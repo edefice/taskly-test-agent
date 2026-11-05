@@ -555,6 +555,25 @@ describe('buildReportInput', () => {
     assert.match(input.repair_note, /The patch was refused/);
   });
 
+  it('claims nothing about the commit when the commit step left no result', () => {
+    const input = buildReportInput(state({ rounds: [added], commit: null }));
+    assert.equal(input.outcome, 'commit_unknown');
+    assert.equal(input.commit_sha, undefined);
+    const { conclusion, title, markdown } = renderReport(input);
+    assert.equal(conclusion, 'neutral');
+    assert.equal(title, 'Tests accepted, but the commit step left no result');
+    assert.match(markdown, /The commit step left no result\. Check the branch history to see whether a commit was made\./);
+    assert.doesNotMatch(markdown, /nothing was committed|added to this pull request/);
+  });
+
+  it('keeps the note about an earlier attempt when the commit step left no result', () => {
+    assert.match(buildReportInput(state({ rounds: [added, rejected] })).repair_note, /accepted earlier were kept/);
+  });
+
+  it('does not report a missing commit when nothing was accepted', () => {
+    assert.equal(buildReportInput(state({ rounds: [rejected], commit: null })).outcome, 'tests_rejected');
+  });
+
   it('reports the last rejection when nothing was accepted', () => {
     assert.equal(buildReportInput(state({ rounds: [rejected] })).outcome, 'tests_rejected');
   });
