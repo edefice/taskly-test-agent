@@ -247,6 +247,10 @@ describe('the workflows in this repository', () => {
     assert.equal(count('ci.yml'), 0);
   });
 
+  it('run the agent only on pull requests into main, because the base commit chooses the tools', () => {
+    assert.match(realWorkflows()['test-agent.yml'], /^on:\n {2}pull_request:\n(?: +#.*\n)* {4}branches: \[main\]\n/m);
+  });
+
   it('give the gate the history it compares with', () => {
     const { jobs } = parseWorkflow(realWorkflows()['test-agent-round.yml']);
     const [checkout] = jobs.find(({ name }) => name === 'verify').steps;

@@ -10,6 +10,8 @@ name: Unit test agent
 
 on:
   pull_request:
+    # Tools come from the base commit, so a pull request into another branch would choose them.
+    branches: [main]
     types: [opened, synchronize, reopened]
 
 permissions: {}
