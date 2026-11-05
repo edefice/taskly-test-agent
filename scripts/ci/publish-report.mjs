@@ -64,7 +64,7 @@ export function buildReportInput({ guard, analysis, regressionCheck, rounds, com
     const note = chosen !== last ? 'A later repair round did not pass, so the tests accepted earlier were kept.' : undefined;
     // An accepted attempt always starts the commit job, so no record means it failed or its record is lost.
     if (!commit) return { ...accepted, outcome: 'commit_unknown', repair_note: note };
-    if (commit?.committed === false) return { ...accepted, outcome: 'tests_rejected', repair_note: `The commit step refused these tests: ${commit.reason ?? 'no reason given'}` };
+    if (commit?.committed === false) return { ...accepted, outcome: 'commit_refused', commit_reason: commit.reason };
     return { ...accepted, outcome: 'tests_added', commit_sha: commit?.commit_sha, repair_note: note };
   }
   return { ...run, outcome: last.outcome, result: last.result, verification: last.verification, failure_reason: last.failure_reason };

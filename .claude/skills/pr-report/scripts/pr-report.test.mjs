@@ -426,6 +426,50 @@ describe('renderReport', () => {
     }
   });
 
+  describe('what comes first when existing tests fail', () => {
+    const regression_check = (count) => ({ regressions: Array.from({ length: count }, (_, index) => `a.test.ts > test ${index}`) });
+
+    it('names the failures in the headline, also when the agent saw no need for tests', () => {
+      const report = renderReport(input({ outcome: 'no_tests_needed', regression_check: regression_check(3) }));
+      assert.equal(report.title, '3 existing tests fail on this pull request');
+      assert.equal(report.markdown.split('\n')[1], '### Unit test agent: 3 existing tests fail on this pull request');
+      assert.equal(report.conclusion, 'failure');
+    });
+
+    it('uses the singular for one', () => {
+      assert.equal(renderReport(input({ regression_check: regression_check(1) })).title, '1 existing test fails on this pull request');
+    });
+
+    it('wins over every outcome, because the check is red in all of them', () => {
+      for (const outcome of ['tests_added', 'tests_rejected', 'agent_failed', 'stale', 'skipped', 'commit_unknown']) {
+        assert.match(renderReport(input({ outcome, regression_check: regression_check(2) })).title, /^2 existing tests fail/, outcome);
+      }
+    });
+
+    it('keeps the usual headline with no regressions', () => {
+      assert.equal(renderReport(input({ regression_check: regression_check(0) })).title, '1 test added to this pull request');
+    });
+
+    it('shows what the agent says about them, as its own words and through the filter', () => {
+      const result = validResult({ regressions: [{ test: 'a > b', explanation: 'The change and the test disagree. @team [x](https://evil.example)' }] });
+      const text = markdown({ result });
+      assert.match(text, /#### What the agent says about failing tests \(not verified\)\n\n- `a > b`: The change and the test disagree\./);
+      assert.doesNotMatch(text, /@team|\[x\]\(https/);
+    });
+
+    it('has no such section when the agent says nothing, or what it says is not a list', () => {
+      assert.doesNotMatch(markdown(), /What the agent says/);
+      assert.doesNotMatch(markdown({ result: { ...validResult(), regressions: 'text' } }), /What the agent says/);
+    });
+  });
+
+  it('names the label when a person skipped the agent, and not a need for tests', () => {
+    const report = renderReport(input({ outcome: 'skipped', analysis: { decision: { reason_code: 'label', reason: 'The label asks to skip the agent.' } }, result: undefined, verification: undefined }));
+    assert.equal(report.title, 'Skipped by the skip-test-agent label');
+    assert.match(report.markdown, /The label asks to skip the agent\./);
+    assert.equal(report.conclusion, 'success');
+  });
+
   it('shows only numbers where the gate gives counts, because that job ran code from the branch', () => {
     const attack = '[Approve here](https://evil.example) @org/team <img src=x>';
     const text = markdown({
