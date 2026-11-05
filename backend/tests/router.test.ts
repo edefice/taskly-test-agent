@@ -18,6 +18,28 @@ it('lists tasks from the repository', async () => {
   expect(response.body).toEqual([todo]);
   expect(repository.list).toHaveBeenCalledOnce();
 });
+it('returns the task summary instead of treating summary as an id', async () => {
+  const { app, repository } = setup();
+  const response = await request(app).get('/api/todos/summary');
+  expect(response.status).toBe(200);
+  expect(response.body).toMatchObject({ total: 1, completed: 0, active: 1, percent_complete: 0 });
+  expect(repository.list).toHaveBeenCalledOnce();
+  expect(repository.get).not.toHaveBeenCalled();
+});
+it('does not count a task due today as overdue in the summary', async () => {
+  vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-10-15T12:00:00Z') });
+  try {
+    const { app, repository } = setup();
+    repository.list.mockResolvedValue([
+      { ...todo, id: 1, due_date: '2026-10-15' },
+      { ...todo, id: 2, due_date: '2026-10-14' },
+    ]);
+    const response = await request(app).get('/api/todos/summary');
+    expect(response.body.overdue).toBe(1);
+  } finally {
+    vi.useRealTimers();
+  }
+});
 it('creates tasks with trimmed input and defaults', async () => {
   const { app, repository } = setup();
   const response = await request(app).post('/api/todos').send({ title: '  Plan the sprint  ', priority: 'high' });
