@@ -69,7 +69,7 @@ export function prepareAgent({ repo, round, artifacts, root = TOOLS_ROOT }) {
     }
   }
   const diffFile = join(artifacts, 'analysis/source.diff');
-  const diff = { text: existsSync(diffFile) ? readFileSync(diffFile, 'utf8') : null, chars: analysis.source_diff?.chars ?? 0, omitted: analysis.source_diff?.omitted === true };
+  const diff = { ...analysis.source_diff, text: existsSync(diffFile) ? readFileSync(diffFile, 'utf8') : null, chars: analysis.source_diff?.chars ?? 0, omitted: analysis.source_diff?.omitted === true };
   const prompt = buildDiffPrompt({ analysis, diff, regressions: readRegressions(artifacts), feedback, repair: round > 0, root });
   return { prompt, claudeArgs: actionClaudeArgs(repo) };
 }
