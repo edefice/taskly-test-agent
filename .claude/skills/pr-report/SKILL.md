@@ -23,7 +23,7 @@ Before you finish a run, whatever the outcome. A run with no valid result counts
 4. Fill in the other lists, or leave them empty:
    - `existing_tests_changed`: an existing test you changed, and why the pull request requires it. Adding an assertion to an existing test is a change, so list it, and do not write that the test is unchanged.
    - `suspected_bugs`: application behavior that looks wrong, with what you expected and what happens.
-   - `regressions`: existing tests the pull request breaks. Do not fix these.
+   - `regressions`: existing tests the pull request breaks, each with why it fails. Do not fix these. The report shows what you write here.
 5. Return the result with the `StructuredOutput` tool.
 
 ## What the report takes from where
@@ -35,7 +35,7 @@ Before you finish a run, whatever the outcome. A run with no valid result counts
 | Existing test files modified | The diff | Shown whatever you say. If you say an existing test is unchanged and the diff shows otherwise, the report marks the mismatch. |
 | Test results and coverage | The gate | Your opinion of your tests does not count. |
 | Skills preloaded | Code: the `skills` field in the agent definition, which includes this skill, and the skill for writing tests in each package with a source file | Code places them in your prompt, so they are certain to reach you. |
-| Skills invoked | The transcript | It records real tool calls. |
+| Skills loaded on demand | The transcript | It records real tool calls. |
 | Check result (green, neutral, red) | Code | Red means existing tests pass on the base commit and fail on the pull request. Your `regressions` list cannot turn the check red. |
 | Turns, cost, model | The transcript | Measured, not stated. |
 

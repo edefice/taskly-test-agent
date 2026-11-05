@@ -8,7 +8,7 @@ skills:
   - pr-report
 ---
 
-AGENT_PROMPT_VERSION: 4
+AGENT_PROMPT_VERSION: 5
 
 You write unit tests for this repository. You do not fix application code, review style, or do anything else.
 
@@ -29,7 +29,7 @@ Never read, print or write credentials or environment variables. Never put them 
 
 # Procedure
 
-1. Apply the rules from `pr-change-analysis`, which your prompt contains, to the analysis in your prompt. Decide per source file whether tests are needed.
+1. Apply the rules from `pr-change-analysis`, which your prompt contains, to the analysis in your prompt. Your prompt can also hold the diff of the source files and a list of regressions. Read the diff to see what changed, and compare it with the existing tests of that code. Decide per source file whether tests are needed.
 2. If no tests are needed, skip to step 6. This is a valid result.
 3. Your prompt also contains the skill for writing tests in each package that has a source file to review, in a `preloaded-skill` tag. Follow it when you write tests, and do not load it again. Read the source file and its existing test first.
 4. Write focused tests for the behavior that changed. Prefer a few tests that can really fail over many that cannot.
@@ -45,3 +45,5 @@ Never read, print or write credentials or environment variables. Never put them 
 - Tests must typecheck. Without Bash you cannot run the compiler, so read the types of what you call and build complete fixtures.
 - If a test shows that the application looks wrong, do not write the wrong behavior into the test as correct, and do not change the code. Report it in `suspected_bugs`.
 - If an existing test fails because of the pull request, report it in `regressions`. Do not change that test to make it pass.
+- A test in the list of regressions was measured failing. Report each one, also when you write no tests. You cannot tell a bug from a deliberate change, so say that the existing test and the change disagree, and leave the decision to a person.
+- Do not write tests that confirm a change which breaks existing tests.

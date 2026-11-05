@@ -5,8 +5,8 @@
 //
 //   ROUND=<n> ARTIFACTS=<dir> prepare-agent.mjs
 //
-// Step outputs: prompt, claude_args. ARTIFACTS holds analysis/analysis.json and, for a repair
-// round, gate-round-<n-1>/round.json and gate.patch from the previous attempt.
+// Step outputs: prompt, claude_args. ARTIFACTS holds analysis/ with analysis.json and source.diff,
+// baseline/regressions.json and, for a repair round, gate-round-<n-1>/round.json and gate.patch.
 
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { join } from 'node:path';
@@ -41,6 +41,15 @@ export function actionClaudeArgs(repo) {
   return kept.map(shellQuote).join(' ');
 }
 
+/** The baseline job ran code from the branch, so this file can be anything. It only adds to the prompt, so a bad one does not stop the run. */
+function readRegressions(artifacts) {
+  try {
+    return readJson(join(artifacts, 'baseline/regressions.json'))?.regressions ?? [];
+  } catch {
+    return [];
+  }
+}
+
 /**
  * @returns {{ prompt: string, claudeArgs: string }}
  * Throws when the tests of the previous attempt cannot be put back.
@@ -59,7 +68,9 @@ export function prepareAgent({ repo, round, artifacts, root = TOOLS_ROOT }) {
       if (!applied) throw new Error(`The previous attempt cannot be put back: ${problems.length} problem(s).`);
     }
   }
-  const prompt = buildDiffPrompt({ analysis, feedback, repair: round > 0, root });
+  const diffFile = join(artifacts, 'analysis/source.diff');
+  const diff = { text: existsSync(diffFile) ? readFileSync(diffFile, 'utf8') : null, chars: analysis.source_diff?.chars ?? 0, omitted: analysis.source_diff?.omitted === true };
+  const prompt = buildDiffPrompt({ analysis, diff, regressions: readRegressions(artifacts), feedback, repair: round > 0, root });
   return { prompt, claudeArgs: actionClaudeArgs(repo) };
 }
 

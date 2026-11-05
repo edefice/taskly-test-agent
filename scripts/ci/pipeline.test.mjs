@@ -172,6 +172,38 @@ describe('with real git', () => {
       write('analysis/analysis.json', JSON.stringify(analysis), artifacts);
     });
 
+    describe('the diff and the regressions', () => {
+      const promptNow = () => prepareAgent({ repo, round: 0, artifacts }).prompt;
+
+      it('places the diff and the regressions in data tags', () => {
+        write('analysis/source.diff', '-a < b\n+a <= b\n', artifacts);
+        write('baseline/regressions.json', JSON.stringify({ regressions: ['a.test.ts > keeps a'] }), artifacts);
+        const prompt = promptNow();
+        assert.match(prompt, /<untrusted-diff-[0-9a-f]+>\n-a < b\n\+a <= b\n\n<\/untrusted-diff-[0-9a-f]+>/);
+        assert.match(prompt, /<untrusted-regressions-[0-9a-f]+>\na\.test\.ts > keeps a\n<\/untrusted-regressions-[0-9a-f]+>/);
+      });
+
+      it('says so when the diff was too large, and places no diff', () => {
+        write('analysis/analysis.json', JSON.stringify({ ...analysis, source_diff: { chars: 90000, omitted: true } }), artifacts);
+        const prompt = promptNow();
+        assert.match(prompt, /has 90000 characters, too many for this prompt/);
+        assert.doesNotMatch(prompt, /untrusted-diff/);
+      });
+
+      it('works with neither, and adds no empty tag', () => {
+        const prompt = promptNow();
+        assert.doesNotMatch(prompt, /untrusted-diff|untrusted-regressions|left out/);
+      });
+
+      for (const [name, text] of [['broken JSON', '{'], ['a list of no strings', '{"regressions":[1,{"a":2}]}'], ['text in place of a list', '{"regressions":"[x](https://evil)"}'], ['no list', '{}']]) {
+        it(`ignores ${name} in the regressions, because a job with code from the branch wrote them`, () => {
+          write('baseline/regressions.json', text, artifacts);
+          const prompt = promptNow();
+          assert.doesNotMatch(prompt, /untrusted-regressions|evil/);
+        });
+      }
+    });
+
     it('builds the first prompt with the analysis in a data tag and no feedback', () => {
       const { prompt, claudeArgs } = prepareAgent({ repo, round: 0, artifacts });
       assert.match(prompt, /<untrusted-analysis-[0-9a-f]+>/);

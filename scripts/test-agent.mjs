@@ -30,7 +30,7 @@ import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { AGENT_NAME, readAgentDefinition, TOOLS_ROOT } from '../.claude/lib/agent-definition.mjs';
 import { buildDiffPrompt, buildFilesPrompt, skillsForSourceFiles } from '../.claude/skills/pr-change-analysis/scripts/build-prompt.mjs';
-import { analyzeChanges, classifyKind } from '../.claude/skills/pr-change-analysis/scripts/analyze-changes.mjs';
+import { analyzeChanges, classifyKind, readSourceDiff } from '../.claude/skills/pr-change-analysis/scripts/analyze-changes.mjs';
 import { readTranscript } from '../.claude/skills/pr-report/scripts/read-transcript.mjs';
 import { renderReport } from '../.claude/skills/pr-report/scripts/render-report.mjs';
 import { AGENT_RESULT_SCHEMA, crossCheckWithVerification, validateResult } from '../.claude/skills/pr-report/scripts/validate-result.mjs';
@@ -166,6 +166,7 @@ function plan(options, repo) {
     };
   }
   const analysis = analyzeChanges({ cwd: repo, base: options.base });
+  const diff = readSourceDiff({ cwd: repo, analysis });
   return {
     needsAgent: analysis.decision.needs_agent,
     analysis,
@@ -173,8 +174,8 @@ function plan(options, repo) {
     sourceFiles: analysis.source_files,
     mergeBase: analysis.merge_base,
     packages: PACKAGES.filter((name) => analysis.areas.includes(name)),
-    prompt: buildDiffPrompt({ analysis, feedback, root: TOOLS_ROOT }),
-    repairPrompt: (text) => buildDiffPrompt({ analysis, feedback: text, repair: true, root: TOOLS_ROOT }),
+    prompt: buildDiffPrompt({ analysis, diff, feedback, root: TOOLS_ROOT }),
+    repairPrompt: (text) => buildDiffPrompt({ analysis, diff, feedback: text, repair: true, root: TOOLS_ROOT }),
   };
 }
 

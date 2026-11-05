@@ -314,6 +314,17 @@ describe('the workflows in this repository', () => {
     assert.equal(count('ci.yml'), 0);
   });
 
+  it('give the agent the baseline, always, and before the step that builds the prompt', () => {
+    const { steps } = parseWorkflow(realWorkflows()['test-agent-round.yml']).jobs.find(({ name }) => name === 'agent');
+    const download = steps.findIndex((step) => step.uses?.startsWith('actions/download-artifact@') && step.with.name === 'baseline');
+    const prepare = steps.findIndex(({ id }) => id === 'prepare');
+    assert.ok(download !== -1 && download < prepare);
+    assert.equal(steps[download].with.path, '${{ runner.temp }}/artifacts/baseline');
+    assert.equal(steps[download].continueOnError, undefined);
+    assert.doesNotMatch(steps[download].text, /^\s+if:/m);
+    assert.doesNotMatch(steps[download].text, /secrets\./);
+  });
+
   it('keep automatic caching off in the jobs of the agent, the commit and the report', () => {
     const steps = (file, jobName) => parseWorkflow(realWorkflows()[file]).jobs.find(({ name }) => name === jobName).steps.filter(({ uses }) => uses?.startsWith('actions/setup-node@'));
     for (const [file, jobName] of [['test-agent-round.yml', 'agent'], ['test-agent.yml', 'commit'], ['test-agent.yml', 'report']]) {
