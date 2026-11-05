@@ -31,7 +31,7 @@ permissions: {}
 
 jobs:
   agent:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
       contents: read
@@ -126,7 +126,7 @@ jobs:
   verify:
     needs: agent
     if: needs.agent.outputs.scan == 'clean'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     permissions:
       contents: read

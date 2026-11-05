@@ -12,6 +12,8 @@ const UNTRUSTED_IN_SCRIPT = /\$\{\{[^}]*(?:github\.event|github\.head_ref|inputs
 // The only commands the job with the key may run. Each one is for tools from the base commit.
 const AGENT_JOB_COMMANDS = [/^node "\$TOOLS\/scripts\/ci\/[\w-]+\.mjs"/, /^mv agent-tools "\$RUNNER_TEMP\/tools"$/, /^echo "TOOLS=\$RUNNER_TEMP\/tools" >> "\$GITHUB_ENV"$/, /^for i in 1 2 3; do sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends bubblewrap socat && break; echo "apt-get attempt \$i failed, retrying\.\.\."; sleep 5; done$/, /^if \[ -f \/proc\/sys\/kernel\/apparmor_restrict_unprivileged_userns \]; then sudo sysctl -w kernel\.apparmor_restrict_unprivileged_userns=0; fi$/];
 const REPORT_JOB = 'report';
+// The steps for bubblewrap and AppArmor are made for this image, and ubuntu-latest moves to a new one.
+const PINNED_RUNNER = 'ubuntu-24.04';
 const INDENT = /^( *)/;
 
 const indentOf = (line) => INDENT.exec(line)[1].length;
@@ -94,6 +96,7 @@ export function checkWorkflow(text, file = 'workflow') {
   if (/secrets\./.test(header)) report('It uses a secret at the top level, where every job gets it.');
   for (const job of workflow.jobs) {
     if (!job.uses && fieldOf(job.head, 4, 'timeout-minutes') === undefined) report(`Job ${job.name} has no timeout-minutes.`);
+    if (!job.uses && fieldOf(job.head, 4, 'runs-on') !== PINNED_RUNNER) report(`Job ${job.name} does not run on ${PINNED_RUNNER}.`);
     if (!job.uses && /secrets\./.test(job.head.join('\n'))) report(`Job ${job.name} uses a secret at the job level, where every step gets it.`);
     const writes = /contents:\s*write/.test(job.head.join('\n'));
     for (const step of job.steps) {

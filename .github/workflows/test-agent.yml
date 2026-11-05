@@ -22,7 +22,7 @@ concurrency:
 
 jobs:
   analyze:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       contents: read
@@ -64,7 +64,7 @@ jobs:
   baseline:
     needs: analyze
     if: needs.analyze.outputs.run == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
       contents: read
@@ -180,7 +180,7 @@ jobs:
       !cancelled()
       && (needs.round-0.outputs.accepted == 'true' || needs.round-1.outputs.accepted == 'true' || needs.round-2.outputs.accepted == 'true')
       && needs.round-0.outputs.scan != 'found' && needs.round-1.outputs.scan != 'found' && needs.round-2.outputs.scan != 'found'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       contents: write
@@ -234,7 +234,7 @@ jobs:
     needs: [analyze, baseline, round-0, round-1, round-2, commit]
     # Also after a failure, because a failure needs an explanation most of all.
     if: ${{ !cancelled() && needs.analyze.outputs.report != 'false' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       contents: read
