@@ -16,7 +16,7 @@ At the start of every run. Choosing not to write tests is a valid result of this
 1. Get the analysis JSON. Your prompt provides it. To produce it by hand, run this from the repository root:
    `node .claude/skills/pr-change-analysis/scripts/analyze-changes.mjs --base <ref>`
 2. Read `decision.reason_code`, `source_files`, `flags` and `shared_test_support`. In CI your prompt also holds the diff of the source files, unless it was too large, and the existing tests this change breaks, if any.
-3. For each path in `source_files`, read the source file and its `existing_test`, if there is one.
+3. For each source file in the diff, or in `source_files` when your prompt has no diff, read the whole file and its `existing_test`, if there is one.
 4. Compare the file with the rules below and decide per file.
 5. Where you will write tests, follow `backend-unit-tests` or `frontend-unit-tests`. Your prompt contains the skill for each package with a source file.
 

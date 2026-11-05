@@ -183,6 +183,16 @@ describe('with real git', () => {
         assert.match(prompt, /<untrusted-regressions-[0-9a-f]+>\na\.test\.ts > keeps a\n<\/untrusted-regressions-[0-9a-f]+>/);
       });
 
+      it('tells the agent where the diff starts and what to read, from the analysis', () => {
+        const base = 'c'.repeat(40);
+        write('analysis/analysis.json', JSON.stringify({ ...analysis, files: [{ path: 'a.ts' }], source_diff: { chars: 4, omitted: false, base, base_kind: 'bot_commit', files: ['a.ts'] } }), artifacts);
+        write('analysis/source.diff', 'text', artifacts);
+        const prompt = promptNow();
+        assert.match(prompt, new RegExp(`It starts at commit ${base}, the last commit of this agent`));
+        assert.match(prompt, /<untrusted-files-to-read-[0-9a-f]+>\na\.ts\n/);
+        assert.match(prompt, /<untrusted-changed-files-[0-9a-f]+>\na\.ts\n/);
+      });
+
       it('says so when the diff was too large, and places no diff', () => {
         write('analysis/analysis.json', JSON.stringify({ ...analysis, source_diff: { chars: 90000, omitted: true } }), artifacts);
         const prompt = promptNow();

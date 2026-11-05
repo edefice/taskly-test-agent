@@ -287,16 +287,37 @@ export function analyzeChanges({ cwd, base, head = 'HEAD', limits = DEFAULT_LIMI
 
 // Above this the prompt gets only the list of files. An action input has a limit too.
 export const MAX_SOURCE_DIFF_CHARS = 40000;
+// The last line of a commit from the agent. It survives a rebase, and the SHA does not.
+export const BOT_TRAILER = 'Unit-Test-Agent-Run:';
+
+/** The newest commit of the agent in this range, or null. */
+function lastBotCommit(cwd, range) {
+  const commits = git(cwd, ['log', '--format=%H%x00%B%x01', range]).split('\x01');
+  for (const commit of commits) {
+    const [sha, message = ''] = commit.trim().split('\0');
+    if (message.split('\n').some((line) => line.startsWith(BOT_TRAILER))) return sha;
+  }
+  return null;
+}
 
 /**
- * The diff of the source files, from git objects, as the analysis is. --text keeps a
- * .gitattributes in the branch from hiding a file as binary.
- * @returns {{ text: string | null, chars: number, omitted: boolean }}
+ * The diff of the source files, from git objects, as the analysis is. It starts at the last commit
+ * of the agent, because what came before already went through the agent and would hide what is
+ * new: a change to a file the pull request adds looks like one new file. With no such commit it
+ * starts at the merge base. --text keeps a .gitattributes in the branch from hiding a file as binary.
+ * @returns {{ text: string | null, chars: number, omitted: boolean, base: string, base_kind: 'bot_commit' | 'merge_base', files: string[] }}
  */
 export function readSourceDiff({ cwd, analysis, limit = MAX_SOURCE_DIFF_CHARS }) {
-  if (analysis.source_files.length === 0) return { text: null, chars: 0, omitted: false };
-  const text = git(cwd, ['--literal-pathspecs', 'diff', ...DIFF_FLAGS, '--text', '--unified=3', '-M', `${analysis.merge_base}..${analysis.head}`, '--', ...analysis.source_files]);
-  return text.length > limit ? { text: null, chars: text.length, omitted: true } : { text, chars: text.length, omitted: false };
+  const botCommit = lastBotCommit(cwd, `${analysis.merge_base}..${analysis.head}`);
+  const base = botCommit ?? analysis.merge_base;
+  const scope = { base, base_kind: botCommit ? 'bot_commit' : 'merge_base' };
+  if (analysis.source_files.length === 0) return { text: null, chars: 0, omitted: false, files: [], ...scope };
+  const args = ['--literal-pathspecs', 'diff', ...DIFF_FLAGS, '--text', '-M'];
+  const range = [`${base}..${analysis.head}`, '--', ...analysis.source_files];
+  const files = git(cwd, [...args, '--name-only', '-z', ...range]).split('\0').filter(Boolean);
+  const text = git(cwd, [...args, '--unified=3', ...range]);
+  if (text === '') return { text: null, chars: 0, omitted: false, files, ...scope };
+  return { text: text.length > limit ? null : text, chars: text.length, omitted: text.length > limit, files, ...scope };
 }
 
 function main() {

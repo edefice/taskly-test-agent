@@ -11,11 +11,11 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { analyzeChanges, readSourceDiff } from '../../.claude/skills/pr-change-analysis/scripts/analyze-changes.mjs';
+import { analyzeChanges, BOT_TRAILER, readSourceDiff } from '../../.claude/skills/pr-change-analysis/scripts/analyze-changes.mjs';
 import { requireEnv, setOutputs, writeJson } from './lib/github.mjs';
 
 export const SKIP_LABEL = 'skip-test-agent';
-export const BOT_TRAILER = 'Unit-Test-Agent-Run:';
+export { BOT_TRAILER };
 
 /**
  * Decides from the event alone, before anything is read from the branch.
@@ -50,8 +50,8 @@ function main(env = process.env) {
     analysis = analyzeChanges({ cwd: repo, base: pullRequest.base.sha, head: headSha });
     if (!analysis.decision.needs_agent) guard = { run: false, report: true, outcome: 'skipped' };
     else {
-      const { text, chars, omitted } = readSourceDiff({ cwd: repo, analysis });
-      analysis.source_diff = { chars, omitted };
+      const { text, ...sourceDiff } = readSourceDiff({ cwd: repo, analysis });
+      analysis.source_diff = sourceDiff;
       if (text !== null) {
         mkdirSync(out, { recursive: true });
         writeFileSync(join(out, 'source.diff'), text);
