@@ -32,9 +32,13 @@ export const SECOND_TIME_ZONE = 'Pacific/Auckland';
 
 const SECRET_ENV = /^(?:ANTHROPIC_|CLAUDE_CODE_OAUTH|GH_TOKEN$|GITHUB_TOKEN$|GH_ENTERPRISE_TOKEN$|GITHUB_ENTERPRISE_TOKEN$|ACTIONS_(?:ID_TOKEN|RUNTIME)|AWS_|NPM_TOKEN$)/;
 
+// With this set, Vitest adds a section to the Job Summary for each run with no explicit reporter.
+// Stryker runs it that way, and each caught mutant is a failed run, so the summary filled with failures.
+const NOT_FOR_TESTS_ENV = /^GITHUB_STEP_SUMMARY$/;
+
 /** The tests run code from the branch, so credentials never reach them, even locally. */
 export function childEnv(env = process.env) {
-  const clean = Object.fromEntries(Object.entries(env).filter(([name]) => !SECRET_ENV.test(name)));
+  const clean = Object.fromEntries(Object.entries(env).filter(([name]) => !SECRET_ENV.test(name) && !NOT_FOR_TESTS_ENV.test(name)));
   return { ...clean, CI: 'true', TZ: 'UTC' };
 }
 
