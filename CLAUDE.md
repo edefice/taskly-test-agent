@@ -78,9 +78,11 @@ These are reported and not fixed yet. Do not add tests that expect the current b
 | The result schema and the report | `.claude/skills/pr-report/` |
 | What the agent may change | `.claude/lib/test-paths.mjs` |
 | The hook that enforces it | `.claude/hooks/guard-tools.mjs` |
+| The security review, read-only and run by hand | `.claude/agents/security-reviewer.md` |
 | The local runner | `scripts/test-agent.mjs` |
 | The workflow | `.github/workflows/test-agent.yml` and `test-agent-round.yml` |
 | The steps of the workflow | `scripts/ci/` |
+| Instruction files taken away before the agent runs | `scripts/ci/lib/instruction-files.mjs` |
 | What a test keeps true in the workflow | `scripts/ci/workflow-rules.mjs` |
 
 When you change the agent definition or a skill, raise `AGENT_PROMPT_VERSION` in the agent definition.
@@ -109,4 +111,6 @@ Add to this list after each mistake.
 - On Linux, `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` makes Claude Code refuse to start without `bubblewrap`, and a run on macOS or a rehearsal with the model stood in for does not show it. It stopped the first real run on GitHub.
 - The `env` of a step that uses a composite action reaches every step inside that action. Give a secret as an input, and read the `action.yml` to see where the input goes.
 - `actions/download-artifact` without `name` puts one match directly in `path` and several matches in directories under it, so a script can work with two artifacts and find nothing with one. A rehearsal that copied artifacts by name passed with two rounds. Read what an action does with its inputs, give each job in a rehearsal only what its steps download, and try the case of one.
+- The documentation of Claude Code says it reads `CLAUDE.md` and not `AGENTS.md`, but version 2.1.317 reads `AGENTS.md`, and the action does not restore it. A small run with a codeword in the file showed this for under a cent. For what decides a security boundary, test the installed version.
+- With `GITHUB_ACTIONS=true` and no explicit reporter, Vitest writes a section to `GITHUB_STEP_SUMMARY` for each run. Under Stryker each caught mutant is a failed run, so a good result looked like 11 failures. The runner log does not show this, because it goes to a file. Look at what a run shows in the UI, and do not give a tool more of the environment than it needs.
 - The guard hook reads command text, so any Bash command containing `git` followed by a word can be blocked, even in a string. If that is a false alarm, use the Grep tool or a file for the text.
