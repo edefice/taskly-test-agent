@@ -25,6 +25,7 @@ vi.mock('./components/TodosHeader', () => ({
     </button>
   ),
 }))
+vi.mock('./components/TodoSummary', () => ({ TodoSummary: () => null }))
 vi.mock('./components/TodoFilters', () => ({ TodoFilters: () => null }))
 vi.mock('./components/TodoList', () => ({
   TodoList: (props: {
