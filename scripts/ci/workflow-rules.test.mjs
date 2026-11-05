@@ -95,6 +95,11 @@ describe('parseWorkflow', () => {
     assert.deepEqual(jobs[0].steps[0].run, ['one', 'two']);
   });
 
+  it('reads the inputs of a step, and not what is nested in them or follows them', () => {
+    const text = 'jobs:\n  a:\n    timeout-minutes: 1\n    steps:\n      - uses: x/y@z\n        with:\n          name: one\n          script: |\n            path: nested\n          # a comment\n        env:\n          pattern: other\n';
+    assert.deepEqual(parseWorkflow(text).jobs[0].steps[0].with, { name: 'one', script: '|' });
+  });
+
   it('fails on a file with no jobs, instead of passing it', () => {
     assert.throws(() => parseWorkflow('name: x\n'), /no top-level jobs/);
     assert.throws(() => parseWorkflow('jobs:\n    wrong:\n        indent: true\n'), /expected layout/);
@@ -129,6 +134,41 @@ describe('checkWorkflow', () => {
       assert.match(errorsOf(broken).join('\n'), expected);
     });
   }
+
+  describe('downloads of artifacts', () => {
+    const job = (name, inputs, extra = '') => `permissions: {}\njobs:\n  ${name}:\n    timeout-minutes: 1\n    steps:\n      - uses: actions/download-artifact@${SHA}\n${extra}        with:\n${inputs.map((line) => `          ${line}\n`).join('')}`;
+    const NAMED = ['name: analysis', 'path: ${{ runner.temp }}/artifacts/analysis'];
+
+    it('accepts a download by name to the directory of that name', () => {
+      assert.deepEqual(errorsOf(job('verify', NAMED)), []);
+    });
+
+    it('accepts a name built from an input, when the path uses the same text', () => {
+      assert.deepEqual(errorsOf(job('verify', ['name: gate-round-${{ inputs.previous }}', 'path: ${{ runner.temp }}/artifacts/gate-round-${{ inputs.previous }}'])), []);
+    });
+
+    it('allows the report to tolerate a failed download', () => {
+      assert.deepEqual(errorsOf(job('report', NAMED, '        continue-on-error: true\n')), []);
+    });
+
+    for (const [name, broken, expected] of [
+      ['a download with no inputs that name it', job('report', ['path: ${{ runner.temp }}/artifacts']), /has no name/],
+      ['a download with no inputs at all', `permissions: {}\njobs:\n  report:\n    timeout-minutes: 1\n    steps:\n      - uses: actions/download-artifact@${SHA}\n`, /has no name/],
+      ['pattern', job('commit', ['pattern: gate-round-*', 'path: ${{ runner.temp }}/artifacts']), /uses pattern/],
+      ['pattern next to a name', job('commit', [...NAMED, 'pattern: gate-round-*']), /uses pattern/],
+      ['merge-multiple', job('commit', [...NAMED, 'merge-multiple: true']), /uses merge-multiple/],
+      ['artifact-ids', job('commit', ['artifact-ids: 1,2', 'path: ${{ runner.temp }}/artifacts']), /uses artifact-ids/],
+      ['a path with no directory for the artifact', job('commit', ['name: analysis', 'path: ${{ runner.temp }}/artifacts']), /must go to .*artifacts\/analysis/],
+      ['a path with another name', job('commit', ['name: analysis', 'path: ${{ runner.temp }}/artifacts/baseline']), /must go to .*artifacts\/analysis/],
+      ['a path in another directory', job('commit', ['name: analysis', 'path: ${{ runner.temp }}/other/analysis']), /must go to .*artifacts\/analysis/],
+      ['no path', job('commit', ['name: analysis']), /must go to .*artifacts\/analysis/],
+      ['a tolerated failure outside the report', job('commit', NAMED, '        continue-on-error: true\n'), /only job report may tolerate/],
+    ]) {
+      it(`rejects ${name}`, () => {
+        assert.match(errorsOf(broken).join('\n'), expected);
+      });
+    }
+  });
 
   it('allows a checkout with credentials only in a job that writes', () => {
     const job = `jobs:\n  commit:\n    timeout-minutes: 1\n    permissions:\n      contents: write\n    steps:\n      - uses: actions/checkout@${SHA}\n`;
@@ -255,6 +295,38 @@ describe('the workflows in this repository', () => {
       }
     }
     assert.deepEqual(writes, { 'test-agent.yml/commit': ['contents: write'], 'test-agent.yml/report': ['pull-requests: write', 'checks: write'] });
+  });
+
+  describe('downloads', () => {
+    const downloadsOf = (jobName) => parseWorkflow(realWorkflows()['test-agent.yml']).jobs.find(({ name }) => name === jobName).steps.filter(({ uses }) => uses?.startsWith('actions/download-artifact@'));
+    const conditionOf = (step) => step.lines.find((line) => line.trim().startsWith('if:'))?.trim().slice(4);
+
+    it('give the commit job only accepted rounds, and let it fail when one is missing', () => {
+      const steps = downloadsOf('commit');
+      assert.deepEqual(steps.map((step) => step.with.name), ['gate-round-0', 'gate-round-1', 'gate-round-2']);
+      assert.deepEqual(steps.map(conditionOf), [0, 1, 2].map((round) => `needs.round-${round}.outputs.accepted == 'true'`));
+    });
+
+    it('start the commit job after an accepted attempt in any round, and not after the scan found the key in any', () => {
+      const head = parseWorkflow(realWorkflows()['test-agent.yml']).jobs.find(({ name }) => name === 'commit').head.join('\n');
+      for (const round of [0, 1, 2]) {
+        assert.ok(head.includes(`needs.round-${round}.outputs.accepted == 'true'`), `accepted in round ${round}`);
+        assert.ok(head.includes(`needs.round-${round}.outputs.scan != 'found'`), `scan in round ${round}`);
+      }
+    });
+
+    it('give the report what it reads, each only when its job can have left it, and a failure does not stop the report', () => {
+      const steps = downloadsOf('report');
+      assert.deepEqual(Object.fromEntries(steps.map((step) => [step.with.name, conditionOf(step)])), {
+        analysis: "needs.analyze.outputs.report != ''",
+        baseline: "needs.baseline.result == 'success'",
+        'gate-round-0': "needs.round-0.outputs.scan == 'clean'",
+        'gate-round-1': "needs.round-1.outputs.scan == 'clean'",
+        'gate-round-2': "needs.round-2.outputs.scan == 'clean'",
+        commit: "needs.commit.result == 'success'",
+      });
+      for (const step of steps) assert.equal(step.continueOnError, 'true', step.with.name);
+    });
   });
 
   it('take the patch to commit from a job with no secret, and check out no code to run in the commit job', () => {
