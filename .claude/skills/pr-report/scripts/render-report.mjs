@@ -27,6 +27,7 @@ export const OUTCOMES = [
   'tests_rejected',
   'agent_failed',
   'stale',
+  'commit_unknown',
   'fork',
 ];
 
@@ -81,6 +82,8 @@ function headline(input) {
       return 'The agent could not finish, nothing was committed';
     case 'stale':
       return 'Result discarded: a newer commit arrived';
+    case 'commit_unknown':
+      return 'Tests accepted, but the commit step left no result';
     case 'fork':
       return 'Skipped: pull requests from forks do not run the agent';
     default:
@@ -101,6 +104,9 @@ function explanation(input) {
       return 'The agent\'s tests did not pass the checks below. This does not block the pull request.';
     case 'stale':
       return 'The pull request moved on while this run was working. The run for the newest commit reports instead.';
+    case 'commit_unknown':
+      // The commit may have landed and only its record may be lost, so this claims neither.
+      return 'The commit step left no result. Check the branch history to see whether a commit was made. This does not block the pull request.';
     case 'fork':
       return 'The agent needs a secret, and GitHub does not expose secrets to forks. Regular CI still runs.';
     default:

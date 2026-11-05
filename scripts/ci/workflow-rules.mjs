@@ -11,6 +11,7 @@ const PINNED = /^[\w.-]+\/[\w./-]+@[0-9a-f]{40}$/;
 const UNTRUSTED_IN_SCRIPT = /\$\{\{[^}]*(?:github\.event|github\.head_ref|inputs\.)[^}]*\}\}/;
 // The only commands the job with the key may run. Each one is for tools from the base commit.
 const AGENT_JOB_COMMANDS = [/^node "\$TOOLS\/scripts\/ci\/[\w-]+\.mjs"/, /^mv agent-tools "\$RUNNER_TEMP\/tools"$/, /^echo "TOOLS=\$RUNNER_TEMP\/tools" >> "\$GITHUB_ENV"$/, /^for i in 1 2 3; do sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends bubblewrap socat && break; echo "apt-get attempt \$i failed, retrying\.\.\."; sleep 5; done$/, /^if \[ -f \/proc\/sys\/kernel\/apparmor_restrict_unprivileged_userns \]; then sudo sysctl -w kernel\.apparmor_restrict_unprivileged_userns=0; fi$/];
+const REPORT_JOB = 'report';
 const INDENT = /^( *)/;
 
 const indentOf = (line) => INDENT.exec(line)[1].length;
@@ -49,7 +50,16 @@ function parseStep(lines) {
     const inline = normalized[runIndex].trim().slice(4).trim();
     run = inline === '|' || inline === '>' ? normalized.slice(runIndex + 1).filter((line) => indentOf(line) > 8 && isContent(line)).map((line) => line.trim()) : [inline];
   }
-  return { lines: normalized, text: normalized.join('\n'), id: field('id'), name: field('name'), uses: field('uses'), run, workingDirectory: field('working-directory') };
+  const withAt = normalized.findIndex((line) => indentOf(line) === 8 && line.trim() === 'with:');
+  const inputs = {};
+  if (withAt !== -1) {
+    for (const line of normalized.slice(withAt + 1)) {
+      if (!isContent(line)) continue;
+      if (indentOf(line) <= 8) break;
+      if (indentOf(line) === 10) inputs[line.trim().slice(0, line.trim().indexOf(':'))] = stripQuotes(line.trim().slice(line.trim().indexOf(':') + 1).trim());
+    }
+  }
+  return { lines: normalized, text: normalized.join('\n'), id: field('id'), name: field('name'), uses: field('uses'), run, workingDirectory: field('working-directory'), continueOnError: field('continue-on-error'), with: inputs };
 }
 
 /** @returns {{ header: string[], jobs: { name: string, lines: string[], uses?: string, steps: object[] }[] }} */
@@ -91,9 +101,30 @@ export function checkWorkflow(text, file = 'workflow') {
       if (step.uses && !step.uses.startsWith('./') && !PINNED.test(step.uses)) report(`${where}: the action is not pinned to a full commit SHA.`);
       if (step.uses?.startsWith('actions/checkout@') && !writes && !/persist-credentials:\s*false/.test(step.text)) report(`${where}: a checkout keeps its credentials.`);
       if (step.run?.some((line) => UNTRUSTED_IN_SCRIPT.test(line))) report(`${where}: a script expands text from the event. Pass it through env.`);
+      if (step.uses?.startsWith('actions/download-artifact@')) {
+        for (const problem of downloadProblems(step, job.name)) report(`${where}: ${problem}`);
+      }
     }
   }
   return errors;
+}
+
+/**
+ * Without a name, the action puts a single match directly in path and several matches in
+ * directories under it, so what a script finds depends on how many artifacts the run left. With a
+ * name it always uses path as given. A failure may be tolerated only in the report, which says what
+ * is missing. Anywhere else a script would go on with part of its input.
+ */
+function downloadProblems(step, jobName) {
+  const problems = [];
+  const { name, path } = step.with;
+  if (!name) problems.push('a download has no name, so its path depends on how many artifacts the run left.');
+  for (const input of ['pattern', 'merge-multiple', 'artifact-ids']) {
+    if (step.with[input] !== undefined) problems.push(`a download uses ${input}, so its path depends on how many artifacts the run left.`);
+  }
+  if (name && path !== `\${{ runner.temp }}/artifacts/${name}`) problems.push(`a download must go to \${{ runner.temp }}/artifacts/${name}, the directory the scripts read.`);
+  if (step.continueOnError !== undefined && jobName !== REPORT_JOB) problems.push(`only job ${REPORT_JOB} may tolerate a failed download.`);
+  return problems;
 }
 
 /**
