@@ -12,6 +12,8 @@ const UNTRUSTED_IN_SCRIPT = /\$\{\{[^}]*(?:github\.event|github\.head_ref|inputs
 // The only commands the job with the key may run. Each one is for tools from the base commit.
 const AGENT_JOB_COMMANDS = [/^node "\$TOOLS\/scripts\/ci\/[\w-]+\.mjs"/, /^mv agent-tools "\$RUNNER_TEMP\/tools"$/, /^echo "TOOLS=\$RUNNER_TEMP\/tools" >> "\$GITHUB_ENV"$/, /^for i in 1 2 3; do sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends bubblewrap socat && break; echo "apt-get attempt \$i failed, retrying\.\.\."; sleep 5; done$/, /^if \[ -f \/proc\/sys\/kernel\/apparmor_restrict_unprivileged_userns \]; then sudo sysctl -w kernel\.apparmor_restrict_unprivileged_userns=0; fi$/];
 const REPORT_JOB = 'report';
+// The steps for bubblewrap and AppArmor are made for this image, and ubuntu-latest moves to a new one.
+const PINNED_RUNNER = 'ubuntu-24.04';
 const INDENT = /^( *)/;
 
 const indentOf = (line) => INDENT.exec(line)[1].length;
@@ -94,13 +96,16 @@ export function checkWorkflow(text, file = 'workflow') {
   if (/secrets\./.test(header)) report('It uses a secret at the top level, where every job gets it.');
   for (const job of workflow.jobs) {
     if (!job.uses && fieldOf(job.head, 4, 'timeout-minutes') === undefined) report(`Job ${job.name} has no timeout-minutes.`);
+    if (!job.uses && fieldOf(job.head, 4, 'runs-on') !== PINNED_RUNNER) report(`Job ${job.name} does not run on ${PINNED_RUNNER}.`);
     if (!job.uses && /secrets\./.test(job.head.join('\n'))) report(`Job ${job.name} uses a secret at the job level, where every step gets it.`);
     const writes = /contents:\s*write/.test(job.head.join('\n'));
+    const holdsAccess = /:\s*write\s*$/m.test(job.head.join('\n')) || /secrets\./.test(job.jobText);
     for (const step of job.steps) {
       const where = `Job ${job.name}, step ${step.name ?? step.id ?? step.uses ?? 'without a name'}`;
       if (step.uses && !step.uses.startsWith('./') && !PINNED.test(step.uses)) report(`${where}: the action is not pinned to a full commit SHA.`);
       if (step.uses?.startsWith('actions/checkout@') && !writes && !/persist-credentials:\s*false/.test(step.text)) report(`${where}: a checkout keeps its credentials.`);
       if (step.run?.some((line) => UNTRUSTED_IN_SCRIPT.test(line))) report(`${where}: a script expands text from the event. Pass it through env.`);
+      if (step.uses?.startsWith('actions/setup-node@') && holdsAccess && !/package-manager-cache:\s*false/.test(step.text)) report(`${where}: automatic caching is on in a job with a secret or write access.`);
       if (step.uses?.startsWith('actions/download-artifact@')) {
         for (const problem of downloadProblems(step, job.name)) report(`${where}: ${problem}`);
       }
@@ -187,7 +192,7 @@ export function checkSecretIsolation(files, roundFile = 'test-agent-round.yml') 
     for (const line of step.run ?? []) {
       if (!AGENT_JOB_COMMANDS.some((allowed) => allowed.test(line))) errors.push(`${roundFile}: job ${agent.name} runs a command it may not: ${line}`);
     }
-    if (step.uses && /actions\/setup-node@/.test(step.uses) && /cache:/.test(step.text)) errors.push(`${roundFile}: job ${agent.name} restores a cache, which code from a pull request can have written.`);
+    if (step.uses && /actions\/setup-node@/.test(step.uses) && /^\s*cache:/m.test(step.text)) errors.push(`${roundFile}: job ${agent.name} restores a cache, which code from a pull request can have written.`);
   }
 
   const order = (step) => agent.steps.indexOf(step);

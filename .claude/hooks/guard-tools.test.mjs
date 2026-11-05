@@ -227,7 +227,7 @@ describe('agent: searching', () => {
     });
   }
 
-  for (const pattern of ['/proc/*/environ', '/proc/self/*', '../../**', 'backend/../../**', '~/.claude/**', '$HOME/**']) {
+  for (const pattern of ['/proc/*/environ', '/proc/self/*', '../../**', 'backend/../../**', '~/.claude/**', '$HOME/**', '{..,x}/**', '{x,../..}/**', 'x/{..,y}/**', '{/etc,x}/**', '{~/.ssh,x}/**', '{$HOME,x}/**', '{{..,a},b}/**', '{..}/**']) {
     it(`Glob may not use the pattern ${pattern}`, () => {
       assertDenied(agentCall('Glob', { pattern }), /outside the repository/);
     });

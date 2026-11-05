@@ -18,7 +18,7 @@ on:
 permissions: {}
 jobs:
   agent:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
       contents: read
@@ -49,7 +49,7 @@ jobs:
         if: \${{ always() && steps.scan.outcome == 'success' }}
         uses: actions/upload-artifact@${SHA}
   verify:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
       contents: read
@@ -69,7 +69,7 @@ jobs:
     secrets:
       ANTHROPIC_API_KEY: \${{ secrets.ANTHROPIC_API_KEY }}
   report:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - run: echo done
@@ -111,6 +111,22 @@ describe('parseWorkflow', () => {
 describe('checkWorkflow', () => {
   const errorsOf = (text) => checkWorkflow(text, 'f.yml');
 
+  describe('the runner', () => {
+    for (const [name, runner] of [['ubuntu-latest', 'ubuntu-latest'], ['another version', 'ubuntu-26.04'], ['a value from a matrix', '${{ matrix.os }}']]) {
+      it(`rejects ${name}`, () => {
+        assert.match(errorsOf(swap(CALLER, 'runs-on: ubuntu-24.04', `runs-on: ${runner}`)).join('\n'), /Job report does not run on ubuntu-24\.04/);
+      });
+    }
+
+    it('rejects a job with none', () => {
+      assert.match(errorsOf(swap(CALLER, '    runs-on: ubuntu-24.04\n', '')).join('\n'), /Job report does not run on/);
+    });
+
+    it('does not ask a call of a reusable workflow for one', () => {
+      assert.deepEqual(errorsOf(`permissions: {}\njobs:\n  round:\n    uses: ./.github/workflows/r.yml\n`), []);
+    });
+  });
+
   it('accepts the shape above', () => {
     assert.deepEqual(errorsOf(ROUND), []);
     assert.deepEqual(errorsOf(CALLER), []);
@@ -123,8 +139,8 @@ describe('checkWorkflow', () => {
     ['write-all', swap(CALLER, 'permissions: {}', 'permissions: write-all'), /write-all/],
     ['secrets inherit', swap(CALLER, 'secrets:\n      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}', 'secrets: inherit'), /inherit/],
     ['a secret at the top level', swap(CALLER, 'jobs:', 'env:\n  K: ${{ secrets.ANTHROPIC_API_KEY }}\njobs:'), /at the top level/],
-    ['a secret at the job level', swap(ROUND, '  verify:\n    runs-on: ubuntu-latest', '  verify:\n    env:\n      K: ${{ secrets.ANTHROPIC_API_KEY }}\n    runs-on: ubuntu-latest'), /at the job level/],
-    ['no timeout', swap(ROUND, '  verify:\n    runs-on: ubuntu-latest\n    timeout-minutes: 20\n', '  verify:\n    runs-on: ubuntu-latest\n'), /verify has no timeout-minutes/],
+    ['a secret at the job level', swap(ROUND, '  verify:\n    runs-on: ubuntu-24.04', '  verify:\n    env:\n      K: ${{ secrets.ANTHROPIC_API_KEY }}\n    runs-on: ubuntu-24.04'), /at the job level/],
+    ['no timeout', swap(ROUND, '  verify:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 20\n', '  verify:\n    runs-on: ubuntu-24.04\n'), /verify has no timeout-minutes/],
     ['an action on a tag', swap(ROUND, `actions/upload-artifact@${SHA}`, 'actions/upload-artifact@v7'), /not pinned/],
     ['an action on a short SHA', swap(ROUND, `actions/upload-artifact@${SHA}`, 'actions/upload-artifact@abc1234'), /not pinned/],
     ['a checkout that keeps credentials', swap(ROUND, `actions/checkout@${SHA}\n        with:\n          persist-credentials: false\n      - name: Keep`, `actions/checkout@${SHA}\n      - name: Keep`), /keeps its credentials/],
@@ -138,7 +154,7 @@ describe('checkWorkflow', () => {
   }
 
   describe('downloads of artifacts', () => {
-    const job = (name, inputs, extra = '') => `permissions: {}\njobs:\n  ${name}:\n    timeout-minutes: 1\n    steps:\n      - uses: actions/download-artifact@${SHA}\n${extra}        with:\n${inputs.map((line) => `          ${line}\n`).join('')}`;
+    const job = (name, inputs, extra = '') => `permissions: {}\njobs:\n  ${name}:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 1\n    steps:\n      - uses: actions/download-artifact@${SHA}\n${extra}        with:\n${inputs.map((line) => `          ${line}\n`).join('')}`;
     const NAMED = ['name: analysis', 'path: ${{ runner.temp }}/artifacts/analysis'];
 
     it('accepts a download by name to the directory of that name', () => {
@@ -155,7 +171,7 @@ describe('checkWorkflow', () => {
 
     for (const [name, broken, expected] of [
       ['a download with no inputs that name it', job('report', ['path: ${{ runner.temp }}/artifacts']), /has no name/],
-      ['a download with no inputs at all', `permissions: {}\njobs:\n  report:\n    timeout-minutes: 1\n    steps:\n      - uses: actions/download-artifact@${SHA}\n`, /has no name/],
+      ['a download with no inputs at all', `permissions: {}\njobs:\n  report:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 1\n    steps:\n      - uses: actions/download-artifact@${SHA}\n`, /has no name/],
       ['pattern', job('commit', ['pattern: gate-round-*', 'path: ${{ runner.temp }}/artifacts']), /uses pattern/],
       ['pattern next to a name', job('commit', [...NAMED, 'pattern: gate-round-*']), /uses pattern/],
       ['merge-multiple', job('commit', [...NAMED, 'merge-multiple: true']), /uses merge-multiple/],
@@ -172,8 +188,38 @@ describe('checkWorkflow', () => {
     }
   });
 
+  describe('automatic caching in setup-node', () => {
+    const job = (head, withLines = ['node-version: 24']) => `permissions: {}\njobs:\n  a:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 1\n${head}    steps:\n      - uses: actions/setup-node@${SHA}\n        with:\n${withLines.map((line) => `          ${line}\n`).join('')}`;
+    const OFF = ['node-version: 24', 'package-manager-cache: false'];
+    const WRITES = (scope) => `    permissions:\n      ${scope}: write\n`;
+    const SECRET = '    env:\n      K: x\n    outputs:\n      s: ${{ secrets.K }}\n';
+
+    for (const [name, head] of [['contents', WRITES('contents')], ['pull requests', WRITES('pull-requests')], ['checks', WRITES('checks')]]) {
+      it(`rejects it in a job that can write ${name}`, () => {
+        assert.match(errorsOf(job(head)).join('\n'), /automatic caching is on/);
+      });
+
+      it(`accepts it turned off in a job that can write ${name}`, () => {
+        assert.deepEqual(errorsOf(job(head, OFF)), []);
+      });
+    }
+
+    it('rejects it on, written out, in a job that can write', () => {
+      assert.match(errorsOf(job(WRITES('contents'), ['package-manager-cache: true'])).join('\n'), /automatic caching is on/);
+    });
+
+    it('looks for a secret in the steps of a job too', () => {
+      const text = `permissions: {}\njobs:\n  a:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 1\n    steps:\n      - uses: actions/setup-node@${SHA}\n      - run: echo x\n        env:\n          K: \${{ secrets.K }}\n`;
+      assert.match(errorsOf(text).join('\n'), /automatic caching is on/);
+    });
+
+    it('leaves a job with no secret and no write access alone, because such a job can run code from the branch', () => {
+      assert.deepEqual(errorsOf(job('    permissions:\n      contents: read\n')), []);
+    });
+  });
+
   it('allows a checkout with credentials only in a job that writes', () => {
-    const job = `jobs:\n  commit:\n    timeout-minutes: 1\n    permissions:\n      contents: write\n    steps:\n      - uses: actions/checkout@${SHA}\n`;
+    const job = `jobs:\n  commit:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 1\n    permissions:\n      contents: write\n    steps:\n      - uses: actions/checkout@${SHA}\n`;
     assert.deepEqual(errorsOf(`permissions: {}\n${job}`), []);
   });
 
@@ -213,8 +259,8 @@ describe('checkSecretIsolation', () => {
     ['npm in the job with the key', swap(ROUND, 'run: node "$TOOLS/scripts/ci/build-agent-prompt.mjs"', 'run: npm ci'), /runs a command it may not: npm ci/],
     ['npx in the job with the key', swap(ROUND, 'run: mv agent-tools "$RUNNER_TEMP/tools"', 'run: npx something'), /runs a command it may not/],
     ['a script from the checkout in the job with the key', swap(ROUND, 'run: node "$TOOLS/scripts/ci/build-agent-prompt.mjs"', 'run: node scripts/ci/build-agent-prompt.mjs'), /runs a command it may not/],
-    ['write access in the job with the key', swap(ROUND, '  agent:\n    runs-on: ubuntu-latest\n    timeout-minutes: 20\n    permissions:\n      contents: read', '  agent:\n    runs-on: ubuntu-latest\n    timeout-minutes: 20\n    permissions:\n      contents: write'), /more than read access/],
-    ['an OIDC token in the job with the key', swap(ROUND, '  agent:\n    runs-on: ubuntu-latest\n    timeout-minutes: 20\n    permissions:\n      contents: read', '  agent:\n    runs-on: ubuntu-latest\n    timeout-minutes: 20\n    permissions:\n      contents: read\n      id-token: write'), /more than read access/],
+    ['write access in the job with the key', swap(ROUND, '  agent:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 20\n    permissions:\n      contents: read', '  agent:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 20\n    permissions:\n      contents: write'), /more than read access/],
+    ['an OIDC token in the job with the key', swap(ROUND, '  agent:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 20\n    permissions:\n      contents: read', '  agent:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 20\n    permissions:\n      contents: read\n      id-token: write'), /more than read access/],
     ['a cache in the job with the key', swap(ROUND, `      - name: Keep the tools`, `      - uses: actions/setup-node@${SHA}\n        with:\n          cache: npm\n      - name: Keep the tools`), /restores a cache/],
     ['an upload that ignores the scan', swap(ROUND, "if: ${{ always() && steps.scan.outcome == 'success' }}", 'if: ${{ always() }}'), /does not depend on a clean scan/],
     ['an upload before the scan', swap(swap(ROUND, `      - name: Upload\n        if: \${{ always() && steps.scan.outcome == 'success' }}\n        uses: actions/upload-artifact@${SHA}\n`, ''), '      - name: Scan the output', `      - name: Upload\n        if: \${{ always() && steps.scan.outcome == 'success' }}\n        uses: actions/upload-artifact@${SHA}\n      - name: Scan the output`), /upload runs before the scan/],
@@ -266,6 +312,14 @@ describe('the workflows in this repository', () => {
     assert.equal(count('test-agent-round.yml'), 2);
     assert.equal(count('test-agent.yml'), 3, 'one passed value for each of the three rounds');
     assert.equal(count('ci.yml'), 0);
+  });
+
+  it('keep automatic caching off in the jobs of the agent, the commit and the report', () => {
+    const steps = (file, jobName) => parseWorkflow(realWorkflows()[file]).jobs.find(({ name }) => name === jobName).steps.filter(({ uses }) => uses?.startsWith('actions/setup-node@'));
+    for (const [file, jobName] of [['test-agent-round.yml', 'agent'], ['test-agent.yml', 'commit'], ['test-agent.yml', 'report']]) {
+      assert.equal(steps(file, jobName).length, 1, jobName);
+      assert.match(steps(file, jobName)[0].text, /package-manager-cache: false/, jobName);
+    }
   });
 
   it('run the agent only on pull requests into main, because the base commit chooses the tools', () => {

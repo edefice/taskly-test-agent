@@ -17,7 +17,7 @@ concurrency:
 jobs:
   backend:
     name: Backend (Node ${{ matrix.node }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     strategy:
       fail-fast: false
@@ -40,7 +40,7 @@ jobs:
 
   frontend:
     name: Frontend (Node ${{ matrix.node }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     strategy:
       fail-fast: false
@@ -62,7 +62,7 @@ jobs:
 
   agent-tooling:
     name: Agent tooling (Node ${{ matrix.node }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     strategy:
       fail-fast: false
