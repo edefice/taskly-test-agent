@@ -185,6 +185,38 @@ function checkGlobPattern(pattern) {
   ) {
     deny(`Pattern ${quoted(pattern)} reaches outside the repository.`);
   }
+  if (patternReachesUnreadable(pattern)) deny(`Pattern ${quoted(pattern)} can match a file that is not readable.`);
+}
+
+// Names that UNREADABLE_SEGMENT protects, to test a search pattern against.
+const UNREADABLE_NAMES = ['.git', '.claude-pr', '.env', '.env.local', '.env.production', '.npmrc', '.test-agent'];
+
+function expandBraces(pattern) {
+  const match = /\{([^{}]*)\}/.exec(pattern);
+  if (!match) return [pattern];
+  return match[1].split(',').flatMap((option) => expandBraces(pattern.replace(match[0], () => option)));
+}
+
+/**
+ * Tests each part of a pattern against the unreadable names. The bare wildcards stay allowed,
+ * because they do not ask for these files by name, and a search that wide is the case for the
+ * deny rules in the settings. That leaves this a check of patterns, and not of what a search returns.
+ */
+function patternReachesUnreadable(pattern) {
+  return expandBraces(pattern).some((option) =>
+    option.split(/[\\/]/).some((segment) => {
+      if (segment === '*' || segment === '**') return false;
+      if (UNREADABLE_SEGMENT.test(segment)) return true;
+      const source = segment.replace(/[.+^$()|{}]/g, '\\$&').replace(/\*+/g, '.*').replace(/\?/g, '.');
+      try {
+        const matcher = new RegExp(`^${source}$`);
+        return UNREADABLE_NAMES.some((name) => matcher.test(name));
+      } catch {
+        // A pattern this check cannot read is one it cannot clear.
+        return true;
+      }
+    }),
+  );
 }
 
 function checkAgentBash(command) {

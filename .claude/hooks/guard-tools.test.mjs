@@ -237,6 +237,26 @@ describe('agent: searching', () => {
     });
   }
 
+  for (const pattern of ['.env', '.env.staging', '.?nv', '**/.env*', '.env.*', 'backend/.env', '**/.e*', '.*', '*env', '?env', '[.]env', '**/{.env,*.ts}', '{.npmrc,a}', '**/.npmrc', '.git/config', '**/.git/**', '.claude-pr/**', '.test-agent/*']) {
+    it(`Glob may not use the pattern ${pattern}, which can match an unreadable file`, () => {
+      assertDenied(agentCall('Glob', { pattern }), /not readable/);
+    });
+
+    it(`Grep may not use the glob ${pattern}, which can match an unreadable file`, () => {
+      assertDenied(agentCall('Grep', { pattern: 'KEY', glob: pattern }), /not readable/);
+    });
+  }
+
+  for (const pattern of ['*', '**', '**/*', '**/*.ts', '*.test.tsx', 'backend/**/*.ts', 'frontend/src/*', '**/*.{ts,tsx}', 'environment.ts', '**/env/**', '**/git/*.ts', 'src/[a-z]*.ts', '.npmr.', 'a(b.ts']) {
+    it(`Glob may use the pattern ${pattern}`, () => {
+      assertAllowed(agentCall('Glob', { pattern }));
+    });
+
+    it(`Grep may use the glob ${pattern}`, () => {
+      assertAllowed(agentCall('Grep', { pattern: 'x', glob: pattern }));
+    });
+  }
+
   it('Glob without a pattern is blocked', () => {
     assertDenied(agentCall('Glob', {}));
   });
