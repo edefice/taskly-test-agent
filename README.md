@@ -1,5 +1,9 @@
 # Taskly App Node
 
+## Unit test agent
+
+On each pull request, a Claude Code agent writes or updates unit tests for the changed code, or says why none are needed. A separate job runs the tests, and the report appears on the pull request. [SOLUTION.md](SOLUTION.md) describes the agent, its skills and the workflow, with example runs and limitations.
+
 ## Setup
 
 ```sh
